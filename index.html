@@ -5,6 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
 <title>Ridhi Chats POS</title>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+
+<!-- PWA Meta Tags -->
+<meta name="theme-color" content="#f59e0b"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Ridhi Chats"/>
+<meta name="application-name" content="Ridhi Chats POS"/>
+<meta name="description" content="Ridhi Chats - Pure Jain Veg POS System"/>
+
+<!-- Manifest (inline via JS blob) -->
+<link rel="manifest" id="manifestLink"/>
+
+<!-- Apple Touch Icons (inline SVG as fallback) -->
+<link rel="apple-touch-icon" id="appleIcon"/>
 <style>
 :root{--bg:#0a0a0f;--bg2:#0d0d12;--bg3:#141418;--bg4:#1a1a24;--border:#1e1e28;--border2:#2a2a35;--text:#e8e0d5;--muted:#666;--amber:#f59e0b;--red:#ef4444;--green:#10b981;--purple:#8b5cf6;}
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -646,9 +661,21 @@ function discSheet(){
 async function syncToSheet(order){
   if(!sheetUrl||!sheetOn)return;
   try{
-    await fetch(sheetUrl,{method:"POST",mode:"no-cors",headers:{"Content-Type":"application/json"},body:JSON.stringify(order)});
-    toast("✅ Saved to Google Sheet!");
+    // Add type so Apps Script routes to Orders sheet
+    await fetch(sheetUrl,{method:"POST",mode:"no-cors",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({...order, type:"order"})});
+    toast("✅ Order saved to Sheet!");
   } catch(e){toast("⚠️ Sheet sync failed — saved locally");}
+}
+
+async function syncExpenseToSheet(expense){
+  if(!sheetUrl||!sheetOn)return;
+  try{
+    // type:"expense" routes to Expenses sheet in Apps Script
+    await fetch(sheetUrl,{method:"POST",mode:"no-cors",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({...expense, type:"expense"})});
+    toast("✅ Expense saved to Sheet!");
+  } catch(e){toast("⚠️ Expense sync failed — saved locally");}
 }
 async function fetchSheet(){
   if(!sheetUrl||!sheetOn){toast("⚠️ Connect a sheet first");return;}
@@ -934,28 +961,29 @@ function showReceipt(o){
 function doPrint(){
   if(!curReceipt)return;
   const o=curReceipt;
-  const h=`<!DOCTYPE html><html><head><meta charset="UTF-8"/><style>
-  body{font-family:monospace;font-size:13px;max-width:300px;margin:18px auto;color:#000;}
-  .r{display:flex;justify-content:space-between;margin-bottom:3px;}
-  .tot{display:flex;justify-content:space-between;font-size:15px;font-weight:900;margin-top:5px;padding-top:5px;border-top:2px solid #000;}
-  hr{border:none;border-top:1px dashed #000;margin:7px 0;}
-  .c{text-align:center;}
-  </style></head><body>
-  <div class="c"><div style="font-size:17px;font-weight:900;">${SHOP}</div><div style="font-size:10px;color:#777;">${TAGLINE}</div></div>
-  <hr/><div class="r"><span>Token: <strong>#${o.token}</strong></span><span>${o.time}</span></div>
-  <div style="font-size:10px;color:#888;">${o.date}</div>
-  ${o.customerName?`<div>Customer: <strong>${o.customerName}</strong></div>`:""}
-  <hr/>${o.items.map(i=>`<div class="r"><span>${i.name} ×${i.qty}</span><span>₹${(i.price*i.qty).toFixed(0)}</span></div>`).join("")}
-  <hr/><div class="r"><span>Subtotal</span><span>${fmt(o.subtotal)}</span></div>
-  ${o.discount>0?`<div class="r"><span>Discount</span><span>-${fmt(o.discount)}</span></div>`:""}
-  ${o.gst>0?`<div class="r"><span>GST 5%</span><span>${fmt(o.gst)}</span></div>`:""}
-  <div class="tot"><span>TOTAL</span><span>${fmt(o.total)}</span></div>
-  <div style="margin-top:5px;font-size:10px;color:#888;">Payment: ${o.paymentMethod.toUpperCase()}</div>
-  <hr/><div class="c"><div style="font-size:10px;font-weight:700;letter-spacing:2px;">YOUR TOKEN</div>
-  <div style="font-size:38px;font-weight:900;letter-spacing:4px;">#${o.token}</div></div>
-  <hr/><div class="c" style="font-size:10px;color:#888;">🙏 Thank you! Pure Jain Veg</div>
-  <script>window.onload=function(){window.print();window.close();}<\/script></body></html>`;
-  const w=window.open("","_blank","width=400,height=680");
+  const rows=o.items.map(i=>'<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>'+i.name+' x'+i.qty+'</span><span>Rs.'+Math.round(i.price*i.qty)+'</span></div>').join('');
+  const h='<!DOCTYPE html><html><head><meta charset="UTF-8"/>'
+    +'<style>body{font-family:monospace;font-size:13px;max-width:300px;margin:18px auto;color:#000;}'
+    +'.r{display:flex;justify-content:space-between;margin-bottom:3px;}'
+    +'.tot{display:flex;justify-content:space-between;font-size:15px;font-weight:900;margin-top:5px;padding-top:5px;border-top:2px solid #000;}'
+    +'hr{border:none;border-top:1px dashed #000;margin:7px 0;}'
+    +'.c{text-align:center;}</style></head><body>'
+    +'<div class="c"><div style="font-size:17px;font-weight:900;">'+SHOP+'</div>'
+    +'<div style="font-size:10px;color:#777;">'+TAGLINE+'</div></div>'
+    +'<hr/><div class="r"><span>Token: <strong>#'+o.token+'</strong></span><span>'+o.time+'</span></div>'
+    +'<div style="font-size:10px;color:#888;">'+o.date+'</div>'
+    +(o.customerName?'<div>Customer: <strong>'+o.customerName+'</strong></div>':'')
+    +'<hr/>'+rows
+    +'<hr/><div class="r"><span>Subtotal</span><span>Rs.'+Math.round(o.subtotal)+'</span></div>'
+    +(o.discount>0?'<div class="r"><span>Discount</span><span>-Rs.'+Math.round(o.discount)+'</span></div>':'')
+    +(o.gst>0?'<div class="r"><span>GST 5%</span><span>Rs.'+Math.round(o.gst)+'</span></div>':'')
+    +'<div class="tot"><span>TOTAL</span><span>Rs.'+Math.round(o.total)+'</span></div>'
+    +'<div style="margin-top:5px;font-size:10px;color:#888;">Payment: '+o.paymentMethod.toUpperCase()+'</div>'
+    +'<hr/><div class="c"><div style="font-size:10px;font-weight:700;letter-spacing:2px;">YOUR TOKEN</div>'
+    +'<div style="font-size:38px;font-weight:900;letter-spacing:4px;">#'+o.token+'</div></div>'
+    +'<hr/><div class="c" style="font-size:10px;color:#888;">Thank you! Pure Jain Veg</div>'
+    +'<'+'script>window.onload=function(){window.print();window.close();}<'+'/script></body></html>';
+  const w=window.open('','_blank','width=400,height=680');
   w.document.write(h);w.document.close();
 }
 function doWA(){
@@ -1844,4 +1872,265 @@ function init(){
   setInterval(updateTime,30000);
 }
 init();
-</script></body></html>
+</script>
+<script>
+// ══════════════════════════════════════════════════════
+//  PWA — Icons + Manifest + Install Prompt
+// ══════════════════════════════════════════════════════
+
+// ── Generate branded icon on Canvas ──
+function generateIcon(size) {
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  // Rounded background gradient
+  const g = ctx.createLinearGradient(0,0,size,size);
+  g.addColorStop(0,'#f59e0b');
+  g.addColorStop(1,'#ef4444');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  const r = size * 0.22;
+  ctx.moveTo(r,0); ctx.lineTo(size-r,0);
+  ctx.quadraticCurveTo(size,0,size,r);
+  ctx.lineTo(size,size-r);
+  ctx.quadraticCurveTo(size,size,size-r,size);
+  ctx.lineTo(r,size); ctx.quadraticCurveTo(0,size,0,size-r);
+  ctx.lineTo(0,r); ctx.quadraticCurveTo(0,0,r,0);
+  ctx.closePath(); ctx.fill();
+
+  // Soft inner circle
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.beginPath();
+  ctx.arc(size*0.5, size*0.42, size*0.3, 0, Math.PI*2);
+  ctx.fill();
+
+  // "RC" bold text
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold ' + Math.round(size*0.3) + 'px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('RC', size*0.5, size*0.41);
+
+  // Bottom label
+  ctx.font = 'bold ' + Math.round(size*0.09) + 'px Arial';
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.fillText('RIDHI CHATS', size*0.5, size*0.75);
+
+  // Small dot decoration
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  ctx.beginPath(); ctx.arc(size*0.5, size*0.87, size*0.04, 0, Math.PI*2); ctx.fill();
+
+  return canvas.toDataURL('image/png');
+}
+
+// ── Inject all icon link tags ──
+function injectIcons() {
+  const ic192 = generateIcon(192);
+  const ic512 = generateIcon(512);
+  const ic180 = generateIcon(180); // Apple touch icon size
+  const ic152 = generateIcon(152);
+  const ic120 = generateIcon(120);
+
+  const head = document.head;
+
+  // Android / PWA manifest icon (set via manifest blob)
+  injectManifest(ic192, ic512);
+
+  // Apple touch icons (iOS home screen)
+  function addLink(rel, sizes, href) {
+    const el = document.createElement('link');
+    el.rel = rel; if(sizes) el.sizes = sizes; el.href = href;
+    head.appendChild(el);
+  }
+  addLink('apple-touch-icon', '180x180', ic180);
+  addLink('apple-touch-icon', '152x152', ic152);
+  addLink('apple-touch-icon', '120x120', ic120);
+  addLink('apple-touch-icon', '192x192', ic192);
+
+  // Favicon
+  addLink('icon', '192x192', ic192);
+  addLink('shortcut icon', null, ic192);
+
+  // MS Tile (Windows)
+  const msMeta = document.createElement('meta');
+  msMeta.name = 'msapplication-TileImage'; msMeta.content = ic192;
+  head.appendChild(msMeta);
+
+  // Set existing placeholder links
+  const ml = document.getElementById('manifestLink');
+  const ai = document.getElementById('appleIcon');
+  if(ai) ai.href = ic180;
+}
+
+// ── Inline Manifest (no separate file needed) ──
+function injectManifest(ic192, ic512) {
+  const manifest = {
+    name: 'Ridhi Chats POS',
+    short_name: 'Ridhi Chats',
+    description: 'Pure Jain Veg Food Stall — Billing & POS System',
+    start_url: './',
+    scope: './',
+    display: 'standalone',
+    background_color: '#0a0a0f',
+    theme_color: '#f59e0b',
+    orientation: 'portrait',
+    lang: 'en-IN',
+    icons: [
+      { src: ic192, sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: ic192, sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+      { src: ic512, sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: ic512, sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+    ]
+  };
+  const blob = new Blob([JSON.stringify(manifest)], {type:'application/manifest+json'});
+  const url  = URL.createObjectURL(blob);
+  const ml   = document.getElementById('manifestLink');
+  if(ml) ml.href = url;
+  // Also append a fresh one in case
+  const lnk  = document.createElement('link');
+  lnk.rel    = 'manifest'; lnk.href = url;
+  document.head.appendChild(lnk);
+}
+
+// ── Service Worker — only on HTTPS (Netlify etc.) ──
+function registerSW() {
+  // SW only works on HTTPS or localhost — skip silently on file://
+  const isSecure = location.protocol === 'https:' || location.hostname === 'localhost';
+  if (!('serviceWorker' in navigator) || !isSecure) return;
+
+  const swCode = `
+const CACHE_NAME = 'ridhi-chats-v2';
+self.addEventListener('install', e => { self.skipWaiting(); });
+self.addEventListener('activate', e => {
+  e.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    )
+  );
+  self.clients.claim();
+});
+self.addEventListener('fetch', e => {
+  if(e.request.method !== 'GET') return;
+  if(e.request.url.includes('script.google.com')) return;
+  e.respondWith(
+    caches.open(CACHE_NAME).then(cache =>
+      cache.match(e.request).then(cached => {
+        const fresh = fetch(e.request).then(res => {
+          if(res && res.status === 200) cache.put(e.request, res.clone());
+          return res;
+        }).catch(() => cached);
+        return cached || fresh;
+      })
+    )
+  );
+});`;
+
+  try {
+    const blob  = new Blob([swCode], {type:'application/javascript'});
+    const swUrl = URL.createObjectURL(blob);
+    navigator.serviceWorker.register(swUrl, {scope: './'})
+      .then(reg => {
+        console.log('SW registered');
+        reg.addEventListener('updatefound', () => {
+          const nw = reg.installing;
+          nw && nw.addEventListener('statechange', () => {
+            if(nw.state === 'installed' && navigator.serviceWorker.controller) {
+              showUpdateBanner();
+            }
+          });
+        });
+      })
+      .catch(err => console.log('SW failed (needs HTTPS):', err.message));
+  } catch(e) {
+    console.log('SW skipped:', e.message);
+  }
+}
+
+// ── Install Prompt (Add to Home Screen button) ──
+let _deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  _deferredPrompt = e;
+  showInstallBanner();
+});
+window.addEventListener('appinstalled', () => {
+  _deferredPrompt = null;
+  const b = document.getElementById('pwaInstallBanner');
+  if(b) b.remove();
+  toast('✅ App installed! Open from home screen 🎉');
+});
+
+function showInstallBanner() {
+  if(document.getElementById('pwaInstallBanner')) return;
+  const b = document.createElement('div');
+  b.id = 'pwaInstallBanner';
+  b.style.cssText = [
+    'position:fixed','bottom:80px','left:50%','transform:translateX(-50%)',
+    'background:linear-gradient(135deg,#f59e0b,#ef4444)',
+    'border:none','border-radius:50px','padding:12px 24px',
+    'color:#000','font-family:Outfit,sans-serif','font-size:13px','font-weight:800',
+    'cursor:pointer','z-index:500','white-space:nowrap',
+    'box-shadow:0 4px 24px rgba(245,158,11,0.6)',
+    'display:flex','align-items:center','gap:8px'
+  ].join(';');
+  b.innerHTML = '📲 Install App on Home Screen';
+  b.onclick = async () => {
+    if(!_deferredPrompt){ toast('Use browser menu → Add to Home Screen'); return; }
+    _deferredPrompt.prompt();
+    const {outcome} = await _deferredPrompt.userChoice;
+    _deferredPrompt = null;
+    b.remove();
+    if(outcome==='accepted') toast('Installing Ridhi Chats... 🚀');
+  };
+  document.body.appendChild(b);
+}
+
+// ── iOS: show "Add to Home Screen" tip ──
+function showIOSTip() {
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent.toLowerCase());
+  const isStandalone = ('standalone' in navigator) && navigator.standalone;
+  if(!isIOS || isStandalone) return;
+  setTimeout(() => {
+    if(document.getElementById('iosTip')) return;
+    const t = document.createElement('div');
+    t.id = 'iosTip';
+    t.style.cssText = [
+      'position:fixed','bottom:0','left:0','right:0','z-index:500',
+      'background:#1a1a24','border-top:1px solid #2a2a35',
+      'padding:14px 16px','font-family:Outfit,sans-serif',
+      'display:flex','align-items:center','gap:12px'
+    ].join(';');
+    t.innerHTML = `
+      <span style="font-size:26px;">📲</span>
+      <div style="flex:1;">
+        <div style="font-size:13px;font-weight:700;color:#e8e0d5;">Install Ridhi Chats</div>
+        <div style="font-size:11px;color:#888;margin-top:2px;">
+          Tap <span style="color:#f59e0b;font-weight:700;">Share ↑</span> then
+          <span style="color:#f59e0b;font-weight:700;">Add to Home Screen</span>
+        </div>
+      </div>
+      <button onclick="document.getElementById('iosTip').remove()"
+        style="background:none;border:none;color:#555;font-size:22px;cursor:pointer;padding:4px;">×</button>`;
+    document.body.appendChild(t);
+    setTimeout(() => t && t.remove && t.remove(), 10000);
+  }, 2500);
+}
+
+// ── Update banner ──
+function showUpdateBanner() {
+  const b = document.createElement('div');
+  b.style.cssText = 'position:fixed;top:56px;left:0;right:0;z-index:400;background:linear-gradient(135deg,#10b981,#0891b2);color:#fff;text-align:center;padding:10px;font-size:13px;font-family:Outfit,sans-serif;font-weight:600;cursor:pointer;';
+  b.textContent = '🔄 New version available — Tap to update';
+  b.onclick = () => window.location.reload();
+  document.body.appendChild(b);
+}
+
+// ── INIT PWA ──
+window.addEventListener('load', () => {
+  injectIcons();
+  registerSW();
+  showIOSTip();
+});
+</script>
+</body></html>
