@@ -357,12 +357,6 @@ html,body{height:100%;font-family:'Outfit',sans-serif;background:var(--bg);color
   <div class="login-card" id="loginCard">
     <div class="login-title">🔐 Sign in to continue</div>
     <div class="login-field">
-      <div class="login-label">USER ID</div>
-      <input class="login-inp" id="loginId" type="text" placeholder="Enter your ID"
-        autocomplete="username" autocapitalize="none" spellcheck="false"
-        onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()"/>
-    </div>
-    <div class="login-field">
       <div class="login-label">PASSWORD</div>
       <div style="position:relative;">
         <input class="login-inp" id="loginPass" type="password" placeholder="Enter password"
@@ -2905,11 +2899,10 @@ const CREDS = { id: "Ridhichats", pass: "Sai@09" };
 
 // ── Login ──
 function doLogin(){
-  const id   = (document.getElementById('loginId')?.value||'').trim();
   const pass = (document.getElementById('loginPass')?.value||'').trim();
   const errEl = document.getElementById('loginError');
 
-  if(id === CREDS.id && pass === CREDS.pass){
+  if(pass === CREDS.pass){
     // Hide error, show loader
     if(errEl) errEl.classList.remove('show');
     document.getElementById('loginCard').style.display='none';
@@ -2917,6 +2910,20 @@ function doLogin(){
     document.querySelector('.splash-location').style.display='none';
     // Save session
     sessionStorage.setItem('rc_auth','1');
+    // Opening sound
+    try{
+      var actx=new(window.AudioContext||window.webkitAudioContext)();
+      var mg=actx.createGain();mg.gain.value=1.2;mg.connect(actx.destination);
+      var now=actx.currentTime;
+      [[523.25,0],[659.25,.15],[783.99,.30],[1046.5,.45]].forEach(function(n){
+        var o=actx.createOscillator(),g=actx.createGain();
+        o.type='triangle';o.frequency.value=n[0];
+        g.gain.setValueAtTime(0,now+n[1]);
+        g.gain.linearRampToValueAtTime(.5,now+n[1]+.05);
+        g.gain.exponentialRampToValueAtTime(.001,now+n[1]+.5);
+        o.connect(g);g.connect(mg);o.start(now+n[1]);o.stop(now+n[1]+.6);
+      });
+    }catch(e){}
     // Enter POS after short delay
     setTimeout(hideSplash, 1200);
   } else {
@@ -2946,7 +2953,7 @@ function hideSplash(){
   const s=document.getElementById('splashScreen');
   if(!s)return;
   s.classList.add('hide');
-  setTimeout(()=>{s.style.display='none'; document.getElementById('loginId').value=''; document.getElementById('loginPass').value='';},600);
+  setTimeout(()=>{s.style.display='none'; var lp=document.getElementById('loginPass'); if(lp)lp.value='';},600);
 }
 
 // Add shake keyframe
@@ -2958,16 +2965,13 @@ function hideSplash(){
 
 // ── PWA INIT ──
 window.addEventListener('load',async()=>{
-  // Check if already logged in this session
-  if(sessionStorage.getItem('rc_auth')==='1'){
-    setTimeout(hideSplash, 800);
-  }
-  // else: wait for user to log in — doLogin() calls hideSplash
-  // Focus login field
+  // Always require login on every load
+  sessionStorage.removeItem('rc_auth');
+  // Focus password field
   setTimeout(()=>{
-    const el=document.getElementById('loginId');
-    if(el && !sessionStorage.getItem('rc_auth')) el.focus();
-  },600);
+    const el=document.getElementById('loginPass');
+    if(el) el.focus();
+  },800);
   // Init icons + manifest
   await injectIcons();
   registerSW();
