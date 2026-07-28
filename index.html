@@ -820,6 +820,7 @@ html,body{height:100%;font-family:'Outfit',sans-serif;background:var(--bg);color
 
 <script>
 
+
 // ── DATA ──
 const MENU={
   "Samosa":{icon:"🥟",color:"#f59e0b",items:[{id:"s1",name:"Veg Samosa",price:20},{id:"s2",name:"Paneer Samosa",price:30},{id:"s3",name:"Shahi Samosa",price:40},{id:"s4",name:"Chana Samosa",price:50},{id:"s5",name:"Bread Samosa",price:50}]},
@@ -841,7 +842,7 @@ const MENU={
   ]}
 };
 const ALL=Object.entries(MENU).flatMap(([cat,v])=>v.items.map(it=>({...it,category:cat,icon:v.icon,color:v.color})));
-const SHOP="Ridhi Chats", TAGLINE="Pure Jain Veg • Katpadi, Vellore";
+const SHOP="Ridhi Chats", TAGLINE="Pure Jain Veg - Katpadi, Vellore";
 const LS_O="rc_orders", LS_U="rc_url", LS_T="rc_tok";
 
 // ── STATE ──
@@ -879,8 +880,8 @@ const nxtTok=()=>{tokCtr=(tokCtr%999)+1;localStorage.setItem(LS_T,tokCtr);return
 const getSub=()=>cart.reduce((s,x)=>s+x.price*x.qty,0);
 const getDA=()=>discType==="percent"?(getSub()*disc)/100:disc;
 const getTax=()=>Math.max(0,getSub()-getDA());
-const getGST=()=>gstOn?getTax()*0.05:0;
-const getTotal=()=>getTax()+getGST();
+const getGST=()=>gstOn?Math.round((getTax()-(getTax()/1.05))*100)/100:0;
+const getTotal=()=>getTax(); // GST already included in price
 const getIC=()=>cart.reduce((s,x)=>s+x.qty,0);
 
 let toastTmr;
@@ -1016,9 +1017,9 @@ function renderCats(){
   const allCats = [...Object.keys(MENU)];
   document.getElementById("catList").innerHTML = allCats.map(c=>`
     <button class="cb ${c===activeCat?"active":""}" onclick="selCat('${c}')">
-      <span style="font-size:14px">${MENU[c]?.icon||"📋"}</span>
+      <span style="font-size:14px">${(MENU[c]&&MENU[c].icon)||"📋"}</span>
       <span style="flex:1">${c}</span>
-      <span style="font-size:10px;color:#444">${MENU[c]?.items?.length||0}</span>
+      <span style="font-size:10px;color:#444">${(MENU[c]&&MENU[c].items&&MENU[c].items.length)||0}</span>
     </button>`).join("")
   + `<button class="cb" onclick="openAddCatModal()"
       style="color:#f59e0b;border-left-color:#f59e0b;background:rgba(245,158,11,0.05);margin-top:6px;">
@@ -1183,13 +1184,13 @@ function opHTML(){
         <input class="inp" type="number" min="0" value="${disc}" oninput="disc=Math.max(0,+this.value);renderOP()" style="flex:1;padding:5px 7px;font-size:11px;" placeholder="0"/>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;">
-        <span style="font-size:11px;color:var(--muted);">GST (5%)</span>
+        <span style="font-size:11px;color:var(--muted);">GST 5% (Incl.)</span>
         <label class="tog"><input type="checkbox" ${gstOn?"checked":""} onchange="gstOn=this.checked;renderOP()"/><span class="tog-s"></span></label>
       </div>
       <div class="ttl-box">
         <div class="tr"><span>Subtotal</span><span>${fmt(sub)}</span></div>
         ${da>0?`<div class="tr grn"><span>Discount</span><span>−${fmt(da)}</span></div>`:""}
-        ${gstOn?`<div class="tr"><span>GST 5%</span><span>${fmt(gst)}</span></div>`:""}
+        ${gstOn?`<div class="tr"><span>SGST (2.5%)</span><span>${fmt(gst/2)}</span></div><div class="tr"><span>CGST (2.5%)</span><span>${fmt(gst/2)}</span></div><div class="tr" style="font-size:10px;color:#555;">(GST included in price)</div>`:""}
         <div class="tr big"><span>TOTAL</span><span>${fmt(tot)}</span></div>
       </div>
       <button class="btn-p" onclick="openPay()">Proceed to Payment →</button>
@@ -1218,7 +1219,7 @@ function openPay(){
     <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:4px;"><span>Items</span><span>${getIC()}</span></div>
     <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:4px;"><span>Subtotal</span><span>${fmt(sub)}</span></div>
     ${da>0?`<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--green);margin-bottom:4px;"><span>Discount</span><span>−${fmt(da)}</span></div>`:""}
-    ${gstOn?`<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:4px;"><span>GST 5%</span><span>${fmt(gst)}</span></div>`:""}
+    ${gstOn?`<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:4px;"><span>SGST 2.5%</span><span>${fmt(gst/2)}</span></div><div class="tr"><span>CGST 2.5%</span><span>${fmt(gst/2)}</span></div>`:""}
     <div style="display:flex;justify-content:space-between;font-size:19px;font-weight:800;color:var(--amber);margin-top:9px;padding-top:9px;border-top:1px solid var(--border);"><span>Total</span><span>${fmt(tot)}</span></div>`;
   document.getElementById("payConfBtn").textContent="✓ Confirm "+fmt(tot);
   document.getElementById("payMod").classList.add("show");
@@ -1231,8 +1232,8 @@ function selPM(m){
 }
 async function placeOrder(){
   if(!cart.length)return;
-  const cn=document.getElementById("custN")?.value||"";
-  const cp=document.getElementById("custP")?.value||"";
+  const cn=(document.getElementById("custN")||{value:""}).value;
+  const cp=(document.getElementById("custP")||{value:""}).value;
   const tok=nxtTok();
   const order={id:Date.now(),token:tok,date:today(),time:nowT(),customerName:cn,customerPhone:cp,
     items:cart.map(i=>({id:i.id,name:i.name,price:i.price,qty:i.qty,icon:i.icon})),
@@ -1268,7 +1269,7 @@ function showReceipt(o){
       <hr style="border:none;border-top:1px dashed #ccc;margin:7px 0;"/>
       <div class="r-row"><span>Subtotal</span><span>${fmt(o.subtotal)}</span></div>
       ${o.discount>0?`<div class="r-row"><span>Discount</span><span>-${fmt(o.discount)}</span></div>`:""}
-      ${o.gst>0?`<div class="r-row"><span>GST 5%</span><span>${fmt(o.gst)}</span></div>`:""}
+      ${o.gst>0?`<div class="r-row"><span>SGST (2.5%)</span><span>${fmt(o.gst/2)}</span></div><div class="r-row"><span>CGST (2.5%)</span><span>${fmt(o.gst/2)}</span></div>`:""}
       <div class="r-tot"><span>TOTAL</span><span>${fmt(o.total)}</span></div>
       <div style="margin-top:5px;font-size:10px;color:#888;">Payment: ${o.paymentMethod.toUpperCase()}</div>
       <hr style="border:none;border-top:1px dashed #ccc;margin:7px 0;"/>
@@ -1279,31 +1280,53 @@ function showReceipt(o){
 }
 function doPrint(){
   if(!curReceipt)return;
-  const o=curReceipt;
-  const rows=o.items.map(i=>'<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>'+i.name+' x'+i.qty+'</span><span>Rs.'+Math.round(i.price*i.qty)+'</span></div>').join('');
-  const h='<!DOCTYPE html><html><head><meta charset="UTF-8"/>'
-    +'<style>body{font-family:monospace;font-size:13px;max-width:300px;margin:18px auto;color:#000;}'
-    +'.r{display:flex;justify-content:space-between;margin-bottom:3px;}'
-    +'.tot{display:flex;justify-content:space-between;font-size:15px;font-weight:900;margin-top:5px;padding-top:5px;border-top:2px solid #000;}'
-    +'hr{border:none;border-top:1px dashed #000;margin:7px 0;}'
-    +'.c{text-align:center;}</style></head><body>'
-    +'<div class="c"><div style="font-size:17px;font-weight:900;">'+SHOP+'</div>'
-    +'<div style="font-size:10px;color:#777;">'+TAGLINE+'</div></div>'
-    +'<hr/><div class="r"><span>Token: <strong>#'+o.token+'</strong></span><span>'+o.time+'</span></div>'
-    +'<div style="font-size:10px;color:#888;">'+o.date+'</div>'
-    +(o.customerName?'<div>Customer: <strong>'+o.customerName+'</strong></div>':'')
-    +'<hr/>'+rows
-    +'<hr/><div class="r"><span>Subtotal</span><span>Rs.'+Math.round(o.subtotal)+'</span></div>'
-    +(o.discount>0?'<div class="r"><span>Discount</span><span>-Rs.'+Math.round(o.discount)+'</span></div>':'')
-    +(o.gst>0?'<div class="r"><span>GST 5%</span><span>Rs.'+Math.round(o.gst)+'</span></div>':'')
-    +'<div class="tot"><span>TOTAL</span><span>Rs.'+Math.round(o.total)+'</span></div>'
-    +'<div style="margin-top:5px;font-size:10px;color:#888;">Payment: '+o.paymentMethod.toUpperCase()+'</div>'
-    +'<hr/><div class="c"><div style="font-size:10px;font-weight:700;letter-spacing:2px;">YOUR TOKEN</div>'
-    +'<div style="font-size:38px;font-weight:900;letter-spacing:4px;">#'+o.token+'</div></div>'
-    +'<hr/><div class="c" style="font-size:10px;color:#888;">Thank you! Pure Jain Veg</div>'
-    +'<'+'script>window.onload=function(){window.print();window.close();}<'+'/script></body></html>';
-  const w=window.open('','_blank','width=400,height=680');
-  w.document.write(h);w.document.close();
+  var o=curReceipt;
+  var itemsHtml='';
+  for(var i=0;i<o.items.length;i++){
+    var it=o.items[i];
+    itemsHtml+='<tr><td>'+it.name+' x'+it.qty+'</td><td align="right">Rs.'+Math.round(it.price*it.qty)+'</td></tr>';
+  }
+  var discRow=o.discount>0?'<tr><td>Discount</td><td align="right">-Rs.'+Math.round(o.discount)+'</td></tr>':'';
+  var gstRow=o.gst>0?'<tr><td>SGST 2.5%</td><td align="right">Rs.'+Math.round(o.gst/2)+'</td></tr><tr><td>CGST 2.5%</td><td align="right">Rs.'+Math.round(o.gst/2)+'</td></tr>':'';
+  var custRow=o.customerName?'<p>Customer: '+o.customerName+'</p>':'';
+  var w=window.open('','_blank','width=400,height=700');
+  if(!w)return;
+  w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8">');
+  w.document.write('<style>');
+  w.document.write('body{font-family:monospace;font-size:13px;width:280px;margin:0 auto;padding:10px;}');
+  w.document.write('h2{text-align:center;font-size:16px;margin:0;}');
+  w.document.write('p{text-align:center;font-size:10px;color:#555;margin:2px 0;}');
+  w.document.write('table{width:100%;border-collapse:collapse;}');
+  w.document.write('td{padding:2px 0;font-size:12px;}');
+  w.document.write('td:last-child{text-align:right;}');
+  w.document.write('.divider{border-top:1px dashed #000;margin:6px 0;}');
+  w.document.write('.total{font-size:15px;font-weight:900;}');
+  w.document.write('.token{text-align:center;font-size:36px;font-weight:900;letter-spacing:4px;}');
+  w.document.write('</style></head><body>');
+  w.document.write('<h2>'+SHOP+'</h2>');
+  w.document.write('<p>Pure Jain Veg</p>');
+  w.document.write('<p>Katpadi, Vellore</p>');
+  w.document.write('<div class="divider"></div>');
+  w.document.write('<table><tr><td>Token: <strong>#'+o.token+'</strong></td><td>'+o.time+'</td></tr></table>');
+  w.document.write('<p style="text-align:left;font-size:11px;color:#888;">'+o.date+'</p>');
+  w.document.write(custRow);
+  w.document.write('<div class="divider"></div>');
+  w.document.write('<table>'+itemsHtml+'</table>');
+  w.document.write('<div class="divider"></div>');
+  w.document.write('<table>');
+  w.document.write('<tr><td>Subtotal</td><td align="right">Rs.'+Math.round(o.subtotal)+'</td></tr>');
+  w.document.write(discRow);
+  w.document.write(gstRow);
+  w.document.write('<tr class="total"><td>TOTAL</td><td align="right">Rs.'+Math.round(o.total)+'</td></tr>');
+  w.document.write('</table>');
+  w.document.write('<p style="text-align:left;font-size:11px;color:#888;margin-top:4px;">Payment: '+o.paymentMethod.toUpperCase()+'</p>');
+  w.document.write('<div class="divider"></div>');
+  w.document.write('<div class="token">#'+o.token+'</div>');
+  w.document.write('<div class="divider"></div>');
+  w.document.write('<p>Thank you! Come Again!</p>');
+  w.document.write('<scr'+'ipt>window.onload=function(){window.print();window.close();}<'+'/scr'+'ipt>');
+  w.document.write('</body></html>');
+  w.document.close();
 }
 function doWA(){
   if(!curReceipt)return;
@@ -1315,10 +1338,10 @@ function doWA(){
 }
 
 // ── DATE HELPERS ──
-function parseINd(str){if(!str)return null;const[d,m,y]=str.split("/");return new Date(+y,+m-1,+d);}
+function parseINd(str){if(!str)return null;var parts=str.split("/");return new Date(+parts[2],+parts[1]-1,+parts[0]);}
 function filtOrders(fId,tId){
-  const fv=document.getElementById(fId)?.value;
-  const tv=document.getElementById(tId)?.value;
+  const fv=(document.getElementById(fId)||{}).value;
+  const tv=(document.getElementById(tId)||{}).value;
   if(!fv&&!tv)return orders;
   const fr=fv?new Date(fv):null;
   const to=tv?new Date(tv):null;
@@ -1342,11 +1365,11 @@ function getWeekOrders(){
     return d&&d>=weekAgo&&d<=now;
   });
 }
-function parseINd(str){if(!str)return null;const[d,m,y]=str.split("/");return new Date(+y,+m-1,+d);}
+function parseINd(str){if(!str)return null;var parts=str.split("/");return new Date(+parts[2],+parts[1]-1,+parts[0]);}
 
 function renderDash(){
-  const fv=document.getElementById("dFrom")?.value;
-  const tv=document.getElementById("dTo")?.value;
+  const fv=(document.getElementById("dFrom")||{}).value;
+  const tv=(document.getElementById("dTo")||{}).value;
   const isFilt=!!(fv||tv);
   const f=isFilt?filtOrders("dFrom","dTo"):orders.filter(o=>o.date===today());
   const td=orders.filter(o=>o.date===today());
@@ -1543,12 +1566,25 @@ function esc(...args){ return [ESC, ...args]; }
 function gs(...args){ return [GS, ...args]; }
 
 function encodeText(text){
-  // Simple ASCII encoder for thermal printer
-  return Array.from(text).map(c => {
-    const code = c.charCodeAt(0);
-    return code > 127 ? 63 : code; // replace non-ASCII with ?
-  });
+  // Convert to ASCII-safe for thermal printer
+  var result = [];
+  for(var i=0;i<text.length;i++){
+    var code = text.charCodeAt(i);
+    if(code < 128){
+      result.push(code);
+    } else {
+      // Keep the character as-is using UTF-8 encoding
+      var encoded = encodeURIComponent(text[i]);
+      if(encoded.length === 3){ // %XX format
+        result.push(parseInt(encoded.slice(1), 16));
+      } else {
+        result.push(32); // space for complex chars
+      }
+    }
+  }
+  return result;
 }
+
 
 function buildReceipt(o){
   const lines = [];
@@ -1575,11 +1611,11 @@ function buildReceipt(o){
     ...(o.customerName ? ['Customer: ' + o.customerName] : []),
     ...(o.customerPhone ? ['Phone: ' + o.customerPhone] : []),
     divider,
-    ...o.items.map(i => row2(i.name.slice(0,20) + ' x' + i.qty, '₹' + (i.price * i.qty).toFixed(0))),
+    ...o.items.map(i => row2(i.name + ' x' + i.qty, '₹' + (i.price * i.qty).toFixed(0))),
     divider,
     row2('Subtotal', fmt(o.subtotal)),
     ...(o.discount > 0 ? [row2('Discount', '-' + fmt(o.discount))] : []),
-    ...(o.gst > 0 ? [row2('GST 5%', fmt(o.gst))] : []),
+    ...(o.gst > 0 ? [row2('SGST 2.5%', fmt(o.gst/2))+"\n"+row2('CGST 2.5%', fmt(o.gst/2))] : []),
     divider,
     row2('TOTAL', fmt(o.total)),
     row2('Payment:', o.paymentMethod.toUpperCase()),
@@ -1613,12 +1649,12 @@ function buildReceipt(o){
   if(o.customerPhone) bytes.push(...encodeText('Phone: ' + o.customerPhone + '\n'));
   bytes.push(...encodeText(divider + '\n'));
   o.items.forEach(i => {
-    bytes.push(...encodeText(row2(i.name.slice(0,20) + ' x' + i.qty, 'Rs.' + (i.price * i.qty).toFixed(0)) + '\n'));
+    bytes.push(...encodeText(row2(i.name + ' x' + i.qty, 'Rs.' + (i.price * i.qty).toFixed(0)) + '\n'));
   });
   bytes.push(...encodeText(divider + '\n'));
   bytes.push(...encodeText(row2('Subtotal', 'Rs.' + o.subtotal.toFixed(0)) + '\n'));
   if(o.discount > 0) bytes.push(...encodeText(row2('Discount', '-Rs.' + o.discount.toFixed(0)) + '\n'));
-  if(o.gst > 0) bytes.push(...encodeText(row2('GST 5%', 'Rs.' + o.gst.toFixed(0)) + '\n'));
+  if(o.gst > 0) bytes.push(...encodeText(row2('SGST 2.5%','Rs.'+(o.gst/2).toFixed(2))+'\n'), ...encodeText(row2('CGST 2.5%','Rs.'+(o.gst/2).toFixed(2))+'\n'));
   bytes.push(...encodeText(divider + '\n'));
   // Bold total
   bytes.push(...esc(0x45, 0x01));
@@ -1866,7 +1902,7 @@ function openComboCreate(){
   document.getElementById("comboEditId").value = "";
   document.getElementById("comboEmoji").value = "🎁";
   document.querySelectorAll(".emoji-pick").forEach(b=>b.classList.remove("selected"));
-  document.querySelector('.emoji-pick[data-emoji="🎁"]')?.classList.add("selected");
+  document.querySelector('.emoji-pick[data-emoji="🎁"]') && (document.querySelector('.emoji-pick[data-emoji="\uD83C\uDF81"]')||{classList:{add:function(){}}}).classList.add("selected");
   document.getElementById("comboModal").classList.add("show");
   setTimeout(()=>document.getElementById("comboName").focus(),200);
 }
@@ -1881,14 +1917,14 @@ function editCombo(id){
   document.getElementById("comboEditId").value = id;
   document.getElementById("comboEmoji").value = c.emoji||"🎁";
   document.querySelectorAll(".emoji-pick").forEach(b=>b.classList.remove("selected"));
-  document.querySelector(`.emoji-pick[data-emoji="${c.emoji||"🎁"}"]`)?.classList.add("selected");
+  document.querySelector(`.emoji-pick[data-emoji="${c.emoji||"🎁"}"]`) && (document.querySelector('.emoji-pick[data-emoji="\uD83C\uDF81"]')||{classList:{add:function(){}}}).classList.add("selected");
   document.getElementById("comboModal").classList.add("show");
 }
 
 function selectComboEmoji(e){
   document.getElementById("comboEmoji").value = e;
   document.querySelectorAll(".emoji-pick").forEach(b=>b.classList.remove("selected"));
-  document.querySelector(`.emoji-pick[data-emoji="${e}"]`)?.classList.add("selected");
+  document.querySelector(`.emoji-pick[data-emoji="${e}"]`) && (document.querySelector('.emoji-pick[data-emoji="\uD83C\uDF81"]')||{classList:{add:function(){}}}).classList.add("selected");
 }
 
 function saveCombo(){
@@ -1962,8 +1998,8 @@ function saveExp_toStorage(){ localStorage.setItem(LS_EXP, JSON.stringify(expens
 function getCatInfo(id){ return EXP_CATS.find(c=>c.id===id)||{id:"other",label:id||"Other",icon:"💼",color:"#9ca3af"}; }
 
 function filtExp(){
-  const fv = document.getElementById("expFrom")?.value;
-  const tv = document.getElementById("expTo")?.value;
+  const fv = (document.getElementById("expFrom")||{}).value;
+  const tv = (document.getElementById("expTo")||{}).value;
   if(!fv&&!tv) return expenses;
   const fr = fv?new Date(fv):null;
   const to = tv?new Date(tv):null;
@@ -2007,7 +2043,7 @@ function renderExp(){
     <div class="sc" style="border-color:rgba(239,68,68,.2);">
       <div style="font-size:20px;margin-bottom:6px;">💰</div>
       <div style="font-size:20px;font-weight:800;color:var(--amber);margin-bottom:2px;">${fmt(filtTotal)}</div>
-      <div style="font-size:10px;color:var(--muted);">${document.getElementById("expFrom")?.value?"Period Total":"All Time Total"}</div>
+      <div style="font-size:10px;color:var(--muted);">${(document.getElementById("expFrom")||{}).value?"Period Total":"All Time Total"}</div>
     </div>
     <div class="sc" style="border-color:rgba(16,185,129,.2);">
       <div style="font-size:20px;margin-bottom:6px;">📈</div>
@@ -2023,7 +2059,7 @@ function renderExp(){
     const catTotals={};
     f.forEach(e=>{ const k=e.category||"other"; catTotals[k]=(catTotals[k]||0)+parseFloat(e.amount); });
     const sorted=Object.entries(catTotals).sort((a,b)=>b[1]-a[1]);
-    const maxVal=sorted[0]?.[1]||1;
+    const maxVal=(sorted[0]&&sorted[0][1])||1;
     document.getElementById("expCatBreakdown").innerHTML=sorted.map(([k,v])=>{
       const ci=getCatInfo(k);
       return `<div style="display:flex;align-items:center;gap:9px;margin-bottom:8px;">
@@ -2078,7 +2114,7 @@ function openExpModal(reset=true){
     </button>`).join("");
   // Re-select if editing
   const selCat = document.getElementById("expSelectedCat").value;
-  if(selCat){ document.getElementById("ecat-"+selCat)?.classList.add("selected"); }
+  if(selCat){ document.getElementById("ecat-"+selCat) && (document.querySelector('.emoji-pick[data-emoji="\uD83C\uDF81"]')||{classList:{add:function(){}}}).classList.add("selected"); }
   document.getElementById("expModal").classList.add("show");
   setTimeout(()=>document.getElementById("expDesc").focus(),200);
 }
@@ -2087,7 +2123,7 @@ function selExpCat(id){
   document.getElementById("expSelectedCat").value=id;
   document.getElementById("expCatCustom").value="";
   document.querySelectorAll(".exp-cat-btn").forEach(b=>b.classList.remove("selected"));
-  document.getElementById("ecat-"+id)?.classList.add("selected");
+  document.getElementById("ecat-"+id) && (document.querySelector('.emoji-pick[data-emoji="\uD83C\uDF81"]')||{classList:{add:function(){}}}).classList.add("selected");
 }
 
 function selExpPM(m){
@@ -2302,7 +2338,7 @@ function saveNewItem(){
   const name  = document.getElementById("newItemName").value.trim();
   const price = parseInt(document.getElementById("newItemPrice").value);
   const cat   = document.getElementById("newItemCategory").value;
-  const emoji = document.getElementById("newItemEmoji").value || MENU[cat]?.icon || "⭐";
+  const emoji = document.getElementById("newItemEmoji").value || (MENU[cat]&&MENU[cat].icon) || "⭐";
   const editId = document.getElementById("editItemId").value;
 
   if(!name)  { toast("⚠️ Enter item name");  document.getElementById("newItemName").focus();  return; }
@@ -2692,8 +2728,7 @@ function init(){
   injectVoiceBtn();
 }
 init();
-</script>
-<script>
+
 // ══════════════════════════════════════════════════════
 //  PWA — SPLASH + MANIFEST + SERVICE WORKER + INSTALL
 // ══════════════════════════════════════════════════════
@@ -2856,11 +2891,11 @@ self.addEventListener('fetch',e=>{
 let _deferredPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{
   e.preventDefault();_deferredPrompt=e;
-  setTimeout(()=>document.getElementById('installBanner')?.classList.add('show'),2000);
+  setTimeout(function(){var b=document.getElementById('installBanner');if(b)b.classList.add('show');},2000);
 });
 window.addEventListener('appinstalled',()=>{
   _deferredPrompt=null;
-  document.getElementById('installBanner')?.classList.remove('show');
+  (function(){var b=document.getElementById('installBanner');if(b)b.classList.remove('show');})();
   toast('✅ App installed! Open from home screen 🎉');
 });
 
@@ -2869,12 +2904,12 @@ function doInstall(){
   _deferredPrompt.prompt();
   _deferredPrompt.userChoice.then(r=>{
     _deferredPrompt=null;
-    document.getElementById('installBanner')?.classList.remove('show');
+    (function(){var b=document.getElementById('installBanner');if(b)b.classList.remove('show');})();
     if(r.outcome==='accepted')toast('Installing Ridhi Chats... 🚀');
   });
 }
 function dismissInstall(){
-  document.getElementById('installBanner')?.classList.remove('show');
+  (function(){var b=document.getElementById('installBanner');if(b)b.classList.remove('show');})();
 }
 
 // ── iOS Safari tip ──
@@ -2882,7 +2917,7 @@ function checkIOSInstall(){
   const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent.toLowerCase());
   const isStandalone=('standalone' in navigator)&&navigator.standalone;
   if(!isIOS||isStandalone)return;
-  setTimeout(()=>document.getElementById('iosTip')?.classList.add('show'),3000);
+  setTimeout(function(){var t=document.getElementById('iosTip');if(t)t.classList.add('show');},3000);
 }
 
 // ── Update banner ──
