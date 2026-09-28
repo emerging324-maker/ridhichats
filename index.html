@@ -1257,79 +1257,18 @@ async function placeOrder(){
 // ── RECEIPT ──
 function showReceipt(o){
   curReceipt=o;
-  document.getElementById("rcptContent").innerHTML=`
-    <div class="r-paper">
-      <div style="text-align:center;margin-bottom:9px;">
-        <div style="font-size:15px;font-weight:900;">${SHOP}</div>
-        <div style="font-size:10px;color:#777;">${TAGLINE}</div>
-      </div>
-      <hr style="border:none;border-top:1px dashed #ccc;margin:7px 0;"/>
-      <div class="r-row"><span>Token: <strong>#${o.token}</strong></span><span>${o.time}</span></div>
-      <div style="font-size:10px;color:#888;margin-bottom:5px;">${o.date}</div>
-      ${o.customerName?`<div style="margin-bottom:3px;font-size:11px;">Customer: <strong>${o.customerName}</strong></div>`:""}
-      ${o.customerPhone?`<div style="margin-bottom:5px;font-size:11px;">Phone: ${o.customerPhone}</div>`:""}
-      <hr style="border:none;border-top:1px dashed #ccc;margin:7px 0;"/>
-      ${o.items.map(i=>`<div class="r-row"><span>${i.name} ×${i.qty}</span><span>₹${(i.price*i.qty).toFixed(0)}</span></div>`).join("")}
-      <hr style="border:none;border-top:1px dashed #ccc;margin:7px 0;"/>
-      <div class="r-row"><span>Subtotal</span><span>${fmt(o.subtotal)}</span></div>
-      ${o.discount>0?`<div class="r-row"><span>Discount</span><span>-${fmt(o.discount)}</span></div>`:""}
-      ${o.gst>0?`<div class="r-row"><span>SGST (2.5%)</span><span>${fmt(o.gst/2)}</span></div><div class="r-row"><span>CGST (2.5%)</span><span>${fmt(o.gst/2)}</span></div>`:""}
-      <div class="r-tot"><span>TOTAL</span><span>${fmt(o.total)}</span></div>
-      <div style="margin-top:5px;font-size:10px;color:#888;">Payment: ${o.paymentMethod.toUpperCase()}</div>
-      <hr style="border:none;border-top:1px dashed #ccc;margin:7px 0;"/>
-      <div style="text-align:center;font-size:10px;color:#888;">🙏 Thank you! Come Again!</div>
-    </div>`;
+  document.getElementById("rcptContent").innerHTML=receiptHTML(o);
   document.getElementById("tkBadge").innerHTML=`<div class="tk-inner"><div style="font-size:9px;font-weight:700;letter-spacing:2px;color:#000;">YOUR TOKEN</div><div style="font-size:34px;font-weight:900;color:#000;letter-spacing:4px;">#${o.token}</div></div>`;
   document.getElementById("rcptMod").classList.add("show");
 }
 function doPrint(){
   if(!curReceipt)return;
-  var o=curReceipt;
-  var itemsHtml='';
-  for(var i=0;i<o.items.length;i++){
-    var it=o.items[i];
-    itemsHtml+='<tr><td>'+it.name+' x'+it.qty+'</td><td align="right">Rs.'+Math.round(it.price*it.qty)+'</td></tr>';
-  }
-  var discRow=o.discount>0?'<tr><td>Discount</td><td align="right">-Rs.'+Math.round(o.discount)+'</td></tr>':'';
-  var gstRow=o.gst>0?'<tr><td>SGST 2.5%</td><td align="right">Rs.'+Math.round(o.gst/2)+'</td></tr><tr><td>CGST 2.5%</td><td align="right">Rs.'+Math.round(o.gst/2)+'</td></tr>':'';
-  var custRow=o.customerName?'<p>Customer: '+o.customerName+'</p>':'';
-  var w=window.open('','_blank','width=400,height=700');
-  if(!w)return;
-  w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8">');
-  w.document.write('<style>');
-  w.document.write('body{font-family:monospace;font-size:13px;width:280px;margin:0 auto;padding:10px;}');
-  w.document.write('h2{text-align:center;font-size:16px;margin:0;}');
-  w.document.write('p{text-align:center;font-size:10px;color:#555;margin:2px 0;}');
-  w.document.write('table{width:100%;border-collapse:collapse;}');
-  w.document.write('td{padding:2px 0;font-size:12px;}');
-  w.document.write('td:last-child{text-align:right;}');
-  w.document.write('.divider{border-top:1px dashed #000;margin:6px 0;}');
-  w.document.write('.total{font-size:15px;font-weight:900;}');
-  w.document.write('.token{text-align:center;font-size:36px;font-weight:900;letter-spacing:4px;}');
-  w.document.write('</style></head><body>');
-  w.document.write('<h2>'+SHOP+'</h2>');
-  w.document.write('<p>Pure Jain Veg</p>');
-  w.document.write('<p>Katpadi, Vellore</p>');
-  w.document.write('<div class="divider"></div>');
-  w.document.write('<table><tr><td>Token: <strong>#'+o.token+'</strong></td><td>'+o.time+'</td></tr></table>');
-  w.document.write('<p style="text-align:left;font-size:11px;color:#888;">'+o.date+'</p>');
-  w.document.write(custRow);
-  w.document.write('<div class="divider"></div>');
-  w.document.write('<table>'+itemsHtml+'</table>');
-  w.document.write('<div class="divider"></div>');
-  w.document.write('<table>');
-  w.document.write('<tr><td>Subtotal</td><td align="right">Rs.'+Math.round(o.subtotal)+'</td></tr>');
-  w.document.write(discRow);
-  w.document.write(gstRow);
-  w.document.write('<tr class="total"><td>TOTAL</td><td align="right">Rs.'+Math.round(o.total)+'</td></tr>');
-  w.document.write('</table>');
-  w.document.write('<p style="text-align:left;font-size:11px;color:#888;margin-top:4px;">Payment: '+o.paymentMethod.toUpperCase()+'</p>');
-  w.document.write('<div class="divider"></div>');
-  w.document.write('<div class="token">#'+o.token+'</div>');
-  w.document.write('<div class="divider"></div>');
-  w.document.write('<p>Thank you! Come Again!</p>');
-  w.document.write('<scr'+'ipt>window.onload=function(){window.print();window.close();}<'+'/scr'+'ipt>');
-  w.document.write('</body></html>');
+  var w=window.open('','_blank','width=420,height=700');
+  if(!w){toast('⚠️ Allow pop-ups to print');return;}
+  w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Bill #'+curReceipt.token+'</title><style>'+RC_CSS
+    +'@page{size:58mm auto;margin:0}body{margin:0}.rc-paper{font-size:2.7mm;padding:2mm 1.5mm;border-radius:0}'
+    +'</style></head><body>'+receiptHTML(curReceipt)
+    +'<scr'+'ipt>window.onload=function(){window.print();setTimeout(function(){window.close();},500);}<'+'/scr'+'ipt></body></html>');
   w.document.close();
 }
 function doWA(){
@@ -1599,9 +1538,14 @@ function prnSafe(s){
     .replace(/[^\x20-\x7E]/g, "")
     .replace(/ +/g, " ").trim();
 }
-function prnRs(n){
+function prnNum(n){
   const v = Math.round((parseFloat(n) || 0) * 100) / 100;
-  return "Rs." + (v % 1 === 0 ? v.toFixed(0) : v.toFixed(2));
+  return v % 1 === 0 ? v.toFixed(0) : v.toFixed(2);
+}
+function prnRs(n){ return "Rs." + prnNum(n); }
+function prnDate(d){
+  const p = String(d || "").split("/");
+  return p.length === 3 ? p[0].padStart(2, "0") + "/" + p[1].padStart(2, "0") + "/" + p[2] : prnSafe(d);
 }
 function prnWrap(s, w){
   const out = []; let line = "";
@@ -1616,65 +1560,94 @@ function prnWrap(s, w){
   return out.length ? out : [""];
 }
 
-// ── Build ESC/POS bytes for one receipt ──
-function buildReceipt(o){
-  const W = PRN_COLS, div = "-".repeat(W);
+// ── Premium receipt layout (58mm = 32 characters per line) ──
+// One layout drives the Bluetooth printer, the on-screen receipt and browser print,
+// so what staff see on screen is exactly what comes out of the PSF210.
+// Line format: {t:text, a:"l"|"c", b:bold, s:0 normal | 1 tall | 2 double (max 16 chars)}
+// Only printer commands proven on the PSF210 are used: reset, align, bold, size, feed.
+function receiptLayout(o){
+  const W = PRN_COLS, L = [];
+  const add = (t, a, b, s) => L.push({t:String(t).slice(0, s === 2 ? W / 2 : W), a:a || "l", b:!!b, s:s || 0});
   const row2 = (l, r) => {
     r = String(r).slice(0, W - 2);
     l = String(l).slice(0, W - r.length - 1);
     return l + " ".repeat(W - l.length - r.length) + r;
   };
-  const b = [];
-  const cmd = (...x) => { b.push(...x); };
-  const line = s => {
-    const t = String(s);
-    for(let i = 0; i < t.length; i++){ const c = t.charCodeAt(i); b.push(c < 128 ? c : 63); }
-    b.push(0x0A);
-  };
-  const center = on => cmd(ESC, 0x61, on ? 1 : 0);
-  const bold = on => cmd(ESC, 0x45, on ? 1 : 0);
-  const size = n => cmd(GS, 0x21, n); // 0x00 normal, 0x01 tall, 0x11 tall+wide
+  const rule = ch => add(ch.repeat(W));
+  const NAME_W = 15, nums = (q, r, a) => String(q).padStart(3) + String(r).padStart(6) + String(a).padStart(8);
 
-  const shop = prnSafe(SHOP);
-  cmd(ESC, 0x40); // reset printer
-  center(true);
-  bold(true); size(shop.length <= W / 2 ? 0x11 : 0x01); line(shop); size(0x00); bold(false);
-  line("Pure Jain Veg");
-  line("Katpadi, Vellore");
-  center(false);
-  line(div);
-  line(row2("Token: #" + prnSafe(o.token), prnSafe(o.time)));
-  line(prnSafe("Date: " + o.date));
-  if(o.customerName) prnWrap(prnSafe("Customer: " + o.customerName), W).forEach(l => line(l));
-  if(o.customerPhone) line(prnSafe("Phone: " + o.customerPhone));
-  line(div);
-  (o.items || []).forEach(i => {
+  const shop = prnSafe(SHOP).toUpperCase() || "RIDHI CHATS";
+  add(shop, "c", true, shop.length <= W / 2 ? 2 : 1);
+  add("* Pure Jain Veg *", "c");
+  add("Katpadi, Vellore", "c");
+  rule("=");
+  add(row2("Token: #" + prnSafe(o.token), prnDate(o.date)));
+  add(row2("Time: " + prnSafe(o.time).toUpperCase(), "Pay: " + prnSafe(String(o.paymentMethod || "cash").toUpperCase())));
+  if(o.customerName) prnWrap(prnSafe("Customer: " + o.customerName), W).forEach(l => add(l));
+  if(o.customerPhone) add(prnSafe("Phone: " + o.customerPhone));
+  rule("-");
+  add("ITEM".padEnd(NAME_W) + nums("QTY", "RATE", "AMOUNT"), "l", true);
+  rule("-");
+  let totQty = 0;
+  const items = o.items || [];
+  items.forEach(i => {
     const qty = parseInt(i.qty) || 0, price = parseFloat(i.price) || 0;
-    const name = prnSafe(i.name), amt = prnRs(price * qty);
-    const one = name + " x" + qty;
-    if(one.length + 1 + amt.length <= W) line(row2(one, amt));
-    else { prnWrap(name, W).forEach(l => line(l)); line(row2("  " + qty + " x " + prnRs(price), amt)); }
+    totQty += qty;
+    const name = prnSafe(i.name) || "Item";
+    const n = nums(qty, prnNum(price), prnNum(price * qty));
+    if(name.length <= NAME_W && String(qty).length <= 2 && n.length <= W - NAME_W) add(name.padEnd(NAME_W) + n);
+    else { prnWrap(name, W).forEach(l => add(l)); add(n.padStart(W)); }
   });
-  line(div);
-  line(row2("Subtotal", prnRs(o.subtotal)));
-  if(parseFloat(o.discount) > 0) line(row2("Discount", "-" + prnRs(o.discount)));
+  rule("-");
+  add(row2("Items: " + items.length, "Qty: " + totQty));
+  add(row2("Subtotal", prnNum(o.subtotal)));
+  if(parseFloat(o.discount) > 0) add(row2("Discount", "-" + prnNum(o.discount)));
   if(parseFloat(o.gst) > 0){
-    line(row2("SGST 2.5% (incl.)", prnRs(o.gst / 2)));
-    line(row2("CGST 2.5% (incl.)", prnRs(o.gst / 2)));
+    add(row2("CGST @2.5% (incl.)", prnNum(o.gst / 2)));
+    add(row2("SGST @2.5% (incl.)", prnNum(o.gst / 2)));
   }
-  line(div);
-  bold(true); size(0x01); line(row2("TOTAL", prnRs(o.total))); size(0x00); bold(false);
-  line(row2("Payment", prnSafe(String(o.paymentMethod || "cash").toUpperCase())));
-  line(div);
-  center(true);
-  line("TOKEN");
-  bold(true); size(0x11); line("#" + prnSafe(o.token)); size(0x00); bold(false);
-  line("");
-  line("Thank you! Come Again!");
-  center(false);
-  cmd(ESC, 0x64, 4); // feed 4 lines so the bill clears the tear bar (PSF210 has no cutter)
+  rule("=");
+  add(row2("TOTAL", prnRs(o.total)), "l", true, 1);
+  rule("=");
+  if(parseFloat(o.discount) > 0) add("You saved " + prnRs(o.discount) + "!", "c", true);
+  add("");
+  add("YOUR TOKEN", "c", true);
+  add("#" + prnSafe(o.token), "c", true, 2);
+  add("");
+  add("Thank you! Please visit again", "c");
+  rule("-");
+  return L;
+}
+
+// ── Build ESC/POS bytes (commands only sent when the style changes) ──
+function buildReceipt(o){
+  const b = [];
+  let a = "l", bo = false, s = 0;
+  b.push(ESC, 0x40); // reset printer — also clears anything left from an earlier print
+  receiptLayout(o).forEach(ln => {
+    if(ln.a !== a){ b.push(ESC, 0x61, ln.a === "c" ? 1 : 0); a = ln.a; }
+    if(ln.b !== bo){ b.push(ESC, 0x45, ln.b ? 1 : 0); bo = ln.b; }
+    if(ln.s !== s){ b.push(GS, 0x21, ln.s === 2 ? 0x11 : ln.s === 1 ? 0x01 : 0x00); s = ln.s; }
+    for(let i = 0; i < ln.t.length; i++){ const c = ln.t.charCodeAt(i); b.push(c < 128 ? c : 63); }
+    b.push(0x0A);
+  });
+  b.push(GS, 0x21, 0x00, ESC, 0x45, 0x00, ESC, 0x61, 0x00);
+  b.push(ESC, 0x64, 4); // feed 4 lines to clear the tear bar (PSF210 has no cutter — never send a cut command)
   return new Uint8Array(b);
 }
+
+// ── Same layout as HTML (screen preview + browser print) ──
+function receiptHTML(o){
+  const h = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return '<div class="rc-paper">' + receiptLayout(o).map(ln =>
+    '<div class="rc-ln' + (ln.a === "c" ? " rc-c" : "") + (ln.b ? " rc-b" : "") + " rc-s" + ln.s + '">' + (h(ln.t) || "&nbsp;") + "</div>"
+  ).join("") + "</div>";
+}
+const RC_CSS = ".rc-paper{background:#fff;color:#111;font-family:'Courier New',Courier,monospace;padding:12px 10px;border-radius:8px;width:max-content;margin:0 auto;}"
+  + ".rc-ln{white-space:pre;width:32ch;line-height:1.35;overflow:hidden;text-align:left;}"
+  + ".rc-c{text-align:center;}.rc-b{font-weight:700;}"
+  + ".rc-s2{font-size:2em;width:16ch;line-height:1.15;margin:0 auto;}"
+  + ".rc-s1{transform:scaleY(1.9);margin:.45em 0;}";
 
 // ── Status bar in the receipt window ──
 function prnUI(text, color, btnText, btnBg, busy){
@@ -1784,9 +1757,13 @@ function onBTDisconnect(){
   if(wasReady && !btPrinting) toast("🔌 Printer sleeping — BT Print will reconnect");
 }
 
-// Send in 20-byte packets: fits the smallest BLE packet size, so no bytes are ever dropped.
+// Send in 20-byte packets (the smallest BLE packet — big packets are what garbled old bills),
+// paced slower than the printer prints so its small buffer can never overflow.
+// A packet is only retried when the browser says it never started ("in progress"),
+// so a retry can never print a line twice.
 async function prnSendBLE(data){
   const withResp = !!btChar.properties.write;
+  let n = 0;
   for(let i = 0; i < data.length; i += 20){
     const chunk = data.slice(i, i + 20);
     for(let a = 0; ; a++){
@@ -1795,18 +1772,28 @@ async function prnSendBLE(data){
         else await btChar.writeValueWithoutResponse(chunk);
         break;
       }catch(e){
-        if(a >= 2 || !btDevice || !btDevice.gatt.connected) throw e;
-        await prnSleep(250);
+        if(a >= 4 || !/in progress/i.test(String(e && e.message)) || !btDevice || !btDevice.gatt.connected) throw e;
+        await prnSleep(150);
       }
     }
-    if(!withResp) await prnSleep(25);
+    await prnSleep(25);
+    if(++n % 10 === 0) await prnSleep(120); // let the print head catch up every ~200 bytes
   }
+}
+
+// Stop accidental duplicate bills: a second print of the same bill needs a "yes".
+const prnPrinted = new Set();
+function prnOkToPrint(o){
+  if(!prnPrinted.has(o.id)) return true;
+  return confirm("Bill #" + o.token + " is already printed.\nPrint one more copy?");
 }
 
 async function doBTPrint(){
   if(btPrinting || prnBusy) return;
   if(!curReceipt){ toast("No receipt to print"); return; }
   if(!navigator.bluetooth){ prnRefreshStatus(); toast("⚠️ " + prnNoBleReason()); return; }
+  if(!prnOkToPrint(curReceipt)) return;
+  const bill = curReceipt;
   const btn = document.getElementById("btPrintBtn");
   const setBtn = (t, d) => { if(btn){ btn.textContent = t; btn.disabled = d; } };
   btPrinting = true;
@@ -1825,8 +1812,10 @@ async function doBTPrint(){
       }
     }
     setBtn("📡 Printing...", true);
-    await prnSendBLE(buildReceipt(curReceipt));
+    await prnSendBLE(buildReceipt(bill));
+    prnPrinted.add(bill.id);
     toast("✅ Printed successfully!");
+    await prnSleep(1500); // keep the button locked while the paper finishes coming out
   }catch(e){
     toast("❌ Print failed — tap BT Print again");
     console.log("BT print error:", e);
@@ -1840,6 +1829,8 @@ async function doBTPrint(){
 // ── RawBT (Android app) — works with Classic-Bluetooth-only printers ──
 function doRawBTPrint(){
   if(!curReceipt){ toast("No receipt to print"); return; }
+  if(!prnOkToPrint(curReceipt)) return;
+  prnPrinted.add(curReceipt.id);
   const data = buildReceipt(curReceipt);
   let bin = "";
   for(let i = 0; i < data.length; i++) bin += String.fromCharCode(data[i]);
@@ -1851,6 +1842,8 @@ async function doSerialPrint(){
   if(!curReceipt){ toast("No receipt to print"); return; }
   if(!navigator.serial){ toast("⚠️ USB/COM printing needs Chrome or Edge on PC"); return; }
   if(btPrinting || prnBusy) return;
+  if(!prnOkToPrint(curReceipt)) return;
+  const bill = curReceipt;
   const btn = document.getElementById("serialBtn");
   btPrinting = true;
   if(btn){ btn.disabled = true; btn.textContent = "💻 Printing..."; }
@@ -1858,9 +1851,11 @@ async function doSerialPrint(){
     if(!serialPort) serialPort = await navigator.serial.requestPort();
     if(!serialPort.writable) await serialPort.open({baudRate:9600});
     const w = serialPort.writable.getWriter();
-    try{ await w.write(buildReceipt(curReceipt)); }
+    try{ await w.write(buildReceipt(bill)); }
     finally{ w.releaseLock(); }
+    prnPrinted.add(bill.id);
     toast("✅ Printed successfully!");
+    await prnSleep(1500);
   }catch(e){
     if(e && e.name === "NotFoundError") toast("No port selected");
     else {
@@ -1896,6 +1891,13 @@ showReceipt = function(o){
   _origShowReceipt(o);
   prnRefreshStatus();
 };
+
+// Receipt styles for the on-screen preview (scales down to fit small phones)
+(function(){
+  const st = document.createElement("style");
+  st.textContent = RC_CSS + "#rcptContent .rc-paper{font-size:clamp(9px,calc((100vw - 110px) / 19.5),13px);}";
+  document.head.appendChild(st);
+})();
 
 // ══════════════════════════════════════════════════════
 //  COMBO MANAGER
