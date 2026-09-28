@@ -568,16 +568,20 @@ html,body{height:100%;font-family:'Outfit',sans-serif;background:var(--bg);color
     <div class="m-hdr"><span class="m-title">Receipt</span><button class="m-x" onclick="closeM('rcptMod')">×</button></div>
     <div id="rcptContent"></div>
     <div class="tk-badge" id="tkBadge"></div>
-    <!-- BT Printer Status bar -->
-    <div id="btStatus" style="display:none;background:var(--bg4);border:1px solid var(--border2);border-radius:10px;padding:9px 13px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;font-size:12px;">
+    <!-- Printer status bar (POSiFLOW PSF210 / any 58mm ESC-POS printer) -->
+    <div id="btStatus" style="background:var(--bg4);border:1px solid var(--border2);border-radius:10px;padding:9px 13px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;">
       <span id="btStatusTxt" style="color:var(--muted);">No printer connected</span>
-      <button onclick="connectBT()" id="btConnBtn" style="background:linear-gradient(135deg,#3b82f6,#8b5cf6);border:none;border-radius:7px;padding:5px 11px;color:#fff;font-family:inherit;font-size:11px;font-weight:700;cursor:pointer;">🔵 Connect</button>
+      <button onclick="connectBT()" id="btConnBtn" style="background:linear-gradient(135deg,#3b82f6,#8b5cf6);border:none;border-radius:7px;padding:5px 11px;color:#fff;font-family:inherit;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;">🔵 Connect</button>
     </div>
     <div class="r-acts" style="grid-template-columns:1fr 1fr 1fr 1fr;">
       <button class="rb" style="background:var(--bg4);border:1px solid var(--border2);color:var(--text);" onclick="doPrint()">🖨️ Print</button>
-      <button class="rb" style="background:linear-gradient(135deg,#3b82f6,#8b5cf6);color:#fff;font-weight:700;" onclick="doBTPrint()">📡 BT Print</button>
+      <button class="rb" id="btPrintBtn" style="background:linear-gradient(135deg,#3b82f6,#8b5cf6);color:#fff;font-weight:700;" onclick="doBTPrint()">📡 BT Print</button>
       <button class="rb" style="background:#0d2010;border:1px solid rgba(37,211,102,.3);color:#25d366;" onclick="doWA()">💬 WA</button>
       <button class="rb" style="background:linear-gradient(135deg,var(--amber),var(--red));color:#000;font-weight:700;" onclick="closeM('rcptMod')">✓ Done</button>
+    </div>
+    <div id="prnAltRow" style="display:none;gap:7px;margin-top:8px;">
+      <button class="rb" id="rawbtBtn" style="display:none;flex:1;background:var(--bg4);border:1px solid var(--border2);color:var(--text);" onclick="doRawBTPrint()">🖨️ Print via RawBT app</button>
+      <button class="rb" id="serialBtn" style="display:none;flex:1;background:var(--bg4);border:1px solid var(--border2);color:var(--text);" onclick="doSerialPrint()">💻 USB / COM Print</button>
     </div>
   </div>
 </div>
@@ -1556,300 +1560,341 @@ function expCSV(){
 
 
 // ══════════════════════════════════════════════════════
-//  BLUETOOTH THERMAL PRINTER (F2C 58mm / ESC-POS)
+//  THERMAL PRINTER — POSiFLOW PSF210 (58mm, ESC/POS)
+//  Route 1: Bluetooth BLE  → Chrome on Android / Windows / Mac  (📡 BT Print)
+//  Route 2: RawBT app      → Android, for Classic-Bluetooth printers (🖨️ RawBT)
+//  Route 3: USB / COM port → Chrome / Edge on PC via Web Serial (💻 USB / COM)
 // ══════════════════════════════════════════════════════
-let btDevice = null, btChar = null;
+const LS_PRINTER = "rc_printer";
+const PRN_COLS = 32; // 58mm paper, Font A = 32 characters per line
+const PRN_UA = navigator.userAgent || "";
+const PRN_IS_ANDROID = /android/i.test(PRN_UA);
+const PRN_IS_IOS = /iphone|ipad|ipod/i.test(PRN_UA) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const PRN_BLUE = "linear-gradient(135deg,#3b82f6,#8b5cf6)", PRN_GREEN = "linear-gradient(135deg,#10b981,#0891b2)";
+let btDevice = null, btChar = null, btPrinting = false, prnBusy = false, serialPort = null;
 
-// ESC/POS command helpers
+// Known BLE print channels (service → write characteristic).
+// PSF210 / PT-210 class printers use the first one; the rest cover other 58mm clones.
+const PRN_BLE = [
+  {s:"000018f0-0000-1000-8000-00805f9b34fb", c:"00002af1-0000-1000-8000-00805f9b34fb"},
+  {s:"e7810a71-73ae-499d-8c15-faa9aef0c3f2", c:"bef8d6c9-9c21-4c9e-b632-bd58c1009f9f"},
+  {s:"49535343-fe7d-4ae5-8fa9-9fafd205e455", c:"49535343-8841-43f4-a8d4-ecbe34729bb3"},
+  {s:"0000ff00-0000-1000-8000-00805f9b34fb", c:"0000ff02-0000-1000-8000-00805f9b34fb"},
+  {s:"0000fff0-0000-1000-8000-00805f9b34fb", c:"0000fff2-0000-1000-8000-00805f9b34fb"},
+  {s:"0000ffe0-0000-1000-8000-00805f9b34fb", c:"0000ffe1-0000-1000-8000-00805f9b34fb"},
+  {s:"0000ae30-0000-1000-8000-00805f9b34fb", c:"0000ae01-0000-1000-8000-00805f9b34fb"},
+  {s:"6e400001-b5a3-f393-e0a9-e50e24dcca9e", c:"6e400002-b5a3-f393-e0a9-e50e24dcca9e"},
+];
+
 const ESC = 0x1B, GS = 0x1D;
-function esc(...args){ return [ESC, ...args]; }
-function gs(...args){ return [GS, ...args]; }
+const prnSleep = ms => new Promise(r => setTimeout(r, ms));
 
-function encodeText(text){
-  // Convert to ASCII-safe for thermal printer
-  var result = [];
-  for(var i=0;i<text.length;i++){
-    var code = text.charCodeAt(i);
-    if(code < 128){
-      result.push(code);
-    } else {
-      result.push(32); // space for non-ASCII (₹, emoji, etc.)
-      if(code >= 0xD800 && code <= 0xDBFF) i++; // emoji = 2 code units, skip the pair
-    }
-  }
-  return result;
+// ── Receipt text helpers (printer only knows plain ASCII) ──
+function prnSafe(s){
+  return String(s == null ? "" : s)
+    .replace(/₹/g, "Rs.")
+    .replace(/[‘’]/g, "'").replace(/[“”]/g, '"')
+    .replace(/[–—−]/g, "-").replace(/×/g, "x")
+    .replace(/\s+/g, " ")
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/ +/g, " ").trim();
+}
+function prnRs(n){
+  const v = Math.round((parseFloat(n) || 0) * 100) / 100;
+  return "Rs." + (v % 1 === 0 ? v.toFixed(0) : v.toFixed(2));
+}
+function prnWrap(s, w){
+  const out = []; let line = "";
+  String(s).split(" ").forEach(word => {
+    while(word.length > w){ if(line){ out.push(line); line = ""; } out.push(word.slice(0, w)); word = word.slice(w); }
+    if(!word) return;
+    if(!line) line = word;
+    else if(line.length + 1 + word.length <= w) line += " " + word;
+    else { out.push(line); line = word; }
+  });
+  if(line) out.push(line);
+  return out.length ? out : [""];
 }
 
-
+// ── Build ESC/POS bytes for one receipt ──
 function buildReceipt(o){
-  const lines = [];
-  const COLS = 32; // 58mm printer = ~32 chars
-
-  const center = (txt) => {
-    const pad = Math.max(0, Math.floor((COLS - txt.length) / 2));
-    return ' '.repeat(pad) + txt;
+  const W = PRN_COLS, div = "-".repeat(W);
+  const row2 = (l, r) => {
+    r = String(r).slice(0, W - 2);
+    l = String(l).slice(0, W - r.length - 1);
+    return l + " ".repeat(W - l.length - r.length) + r;
   };
-  const divider = '-'.repeat(COLS);
-  const row2 = (left, right) => {
-    const max = COLS - right.length - 1;
-    if(left.length > max) left = left.slice(0, max); // truncate long names so price stays right-aligned
-    const space = COLS - left.length - right.length;
-    return left + ' '.repeat(Math.max(1, space)) + right;
+  const b = [];
+  const cmd = (...x) => { b.push(...x); };
+  const line = s => {
+    const t = String(s);
+    for(let i = 0; i < t.length; i++){ const c = t.charCodeAt(i); b.push(c < 128 ? c : 63); }
+    b.push(0x0A);
   };
+  const center = on => cmd(ESC, 0x61, on ? 1 : 0);
+  const bold = on => cmd(ESC, 0x45, on ? 1 : 0);
+  const size = n => cmd(GS, 0x21, n); // 0x00 normal, 0x01 tall, 0x11 tall+wide
 
-  // Build text content
-  const content = [
-    center(SHOP),
-    center(TAGLINE),
-    center('Katpadi, Vellore'),
-    divider,
-    row2('Token: #' + o.token, o.time),
-    o.date,
-    ...(o.customerName ? ['Customer: ' + o.customerName] : []),
-    ...(o.customerPhone ? ['Phone: ' + o.customerPhone] : []),
-    divider,
-    ...o.items.map(i => row2(i.name + ' x' + i.qty, '₹' + (i.price * i.qty).toFixed(0))),
-    divider,
-    row2('Subtotal', fmt(o.subtotal)),
-    ...(o.discount > 0 ? [row2('Discount', '-' + fmt(o.discount))] : []),
-    ...(o.gst > 0 ? [row2('SGST 2.5%', fmt(o.gst/2))+"\n"+row2('CGST 2.5%', fmt(o.gst/2))] : []),
-    divider,
-    row2('TOTAL', fmt(o.total)),
-    row2('Payment:', o.paymentMethod.toUpperCase()),
-    divider,
-    center('Thank you! Come Again!'),
-    center('Pure Jain Veg'),
-    '',
-    '',
-    ''
-  ].join('\n');
-
-  // Build byte array with ESC/POS commands
-  const bytes = [];
-  // Initialize printer
-  bytes.push(...esc(0x40));
-  // Center align for header
-  bytes.push(...esc(0x61, 0x01));
-  // Double height+width for shop name
-  bytes.push(...gs(0x21, 0x11));
-  bytes.push(...encodeText(SHOP + '\n'));
-  // Normal size
-  bytes.push(...gs(0x21, 0x00));
-  bytes.push(...encodeText(TAGLINE + '\n'));
-  bytes.push(...encodeText('Katpadi, Vellore\n'));
-  // Left align for rest
-  bytes.push(...esc(0x61, 0x00));
-  bytes.push(...encodeText(divider + '\n'));
-  bytes.push(...encodeText('Token: #' + o.token + '  ' + o.time + '\n'));
-  bytes.push(...encodeText(o.date + '\n'));
-  if(o.customerName) bytes.push(...encodeText('Customer: ' + o.customerName + '\n'));
-  if(o.customerPhone) bytes.push(...encodeText('Phone: ' + o.customerPhone + '\n'));
-  bytes.push(...encodeText(divider + '\n'));
-  o.items.forEach(i => {
-    bytes.push(...encodeText(row2(i.name + ' x' + i.qty, 'Rs.' + (i.price * i.qty).toFixed(0)) + '\n'));
+  const shop = prnSafe(SHOP);
+  cmd(ESC, 0x40); // reset printer
+  center(true);
+  bold(true); size(shop.length <= W / 2 ? 0x11 : 0x01); line(shop); size(0x00); bold(false);
+  line("Pure Jain Veg");
+  line("Katpadi, Vellore");
+  center(false);
+  line(div);
+  line(row2("Token: #" + prnSafe(o.token), prnSafe(o.time)));
+  line(prnSafe("Date: " + o.date));
+  if(o.customerName) prnWrap(prnSafe("Customer: " + o.customerName), W).forEach(l => line(l));
+  if(o.customerPhone) line(prnSafe("Phone: " + o.customerPhone));
+  line(div);
+  (o.items || []).forEach(i => {
+    const qty = parseInt(i.qty) || 0, price = parseFloat(i.price) || 0;
+    const name = prnSafe(i.name), amt = prnRs(price * qty);
+    const one = name + " x" + qty;
+    if(one.length + 1 + amt.length <= W) line(row2(one, amt));
+    else { prnWrap(name, W).forEach(l => line(l)); line(row2("  " + qty + " x " + prnRs(price), amt)); }
   });
-  bytes.push(...encodeText(divider + '\n'));
-  bytes.push(...encodeText(row2('Subtotal', 'Rs.' + o.subtotal.toFixed(0)) + '\n'));
-  if(o.discount > 0) bytes.push(...encodeText(row2('Discount', '-Rs.' + o.discount.toFixed(0)) + '\n'));
-  if(o.gst > 0) bytes.push(...encodeText(row2('SGST 2.5%','Rs.'+(o.gst/2).toFixed(2))+'\n'), ...encodeText(row2('CGST 2.5%','Rs.'+(o.gst/2).toFixed(2))+'\n'));
-  bytes.push(...encodeText(divider + '\n'));
-  // Bold total
-  bytes.push(...esc(0x45, 0x01));
-  bytes.push(...gs(0x21, 0x01));
-  bytes.push(...encodeText(row2('TOTAL', 'Rs.' + o.total.toFixed(0)) + '\n'));
-  bytes.push(...gs(0x21, 0x00));
-  bytes.push(...esc(0x45, 0x00));
-  bytes.push(...encodeText('Payment: ' + o.paymentMethod.toUpperCase() + '\n'));
-  bytes.push(...encodeText(divider + '\n'));
-  // Center thank you
-  bytes.push(...esc(0x61, 0x01));
-  bytes.push(...encodeText('Thank you! Come Again!\n'));
-  bytes.push(...encodeText('Pure Jain Veg\n'));
-  // Feed and cut
-  bytes.push(...esc(0x64, 0x05)); // feed 5 lines
-  bytes.push(...gs(0x56, 0x41, 0x03)); // partial cut
+  line(div);
+  line(row2("Subtotal", prnRs(o.subtotal)));
+  if(parseFloat(o.discount) > 0) line(row2("Discount", "-" + prnRs(o.discount)));
+  if(parseFloat(o.gst) > 0){
+    line(row2("SGST 2.5% (incl.)", prnRs(o.gst / 2)));
+    line(row2("CGST 2.5% (incl.)", prnRs(o.gst / 2)));
+  }
+  line(div);
+  bold(true); size(0x01); line(row2("TOTAL", prnRs(o.total))); size(0x00); bold(false);
+  line(row2("Payment", prnSafe(String(o.paymentMethod || "cash").toUpperCase())));
+  line(div);
+  center(true);
+  line("TOKEN");
+  bold(true); size(0x11); line("#" + prnSafe(o.token)); size(0x00); bold(false);
+  line("");
+  line("Thank you! Come Again!");
+  center(false);
+  cmd(ESC, 0x64, 4); // feed 4 lines so the bill clears the tear bar (PSF210 has no cutter)
+  return new Uint8Array(b);
+}
 
-  return new Uint8Array(bytes);
+// ── Status bar in the receipt window ──
+function prnUI(text, color, btnText, btnBg, busy){
+  const st = document.getElementById("btStatusTxt"), cb = document.getElementById("btConnBtn");
+  if(st){ st.textContent = text; st.style.color = color; }
+  if(cb){ cb.textContent = btnText; cb.style.background = btnBg; cb.disabled = !!busy; }
+}
+function prnNoBleReason(){
+  if(PRN_IS_IOS) return "iPhone/iPad: use 🖨️ Print";
+  if(!window.isSecureContext) return "Bluetooth needs the https:// link";
+  if(PRN_IS_ANDROID) return "Open in Chrome, or use RawBT";
+  return "Use Chrome or Edge for Bluetooth";
+}
+function prnRefreshStatus(){
+  const name = (btDevice && btDevice.name) || "Printer";
+  if(btChar && btDevice && btDevice.gatt.connected) prnUI("🟢 " + name + " ready", "#10b981", "✓ " + name, PRN_GREEN, false);
+  else if(btDevice) prnUI("Saved: " + name + " — tap BT Print", "var(--muted)", "🔵 Change", PRN_BLUE, false);
+  else if(!navigator.bluetooth) prnUI(prnNoBleReason(), "var(--muted)", "🔵 Connect", PRN_BLUE, false);
+  else prnUI("No printer connected", "var(--muted)", "🔵 Connect", PRN_BLUE, false);
+  const showRaw = PRN_IS_ANDROID, showSer = !!navigator.serial && !PRN_IS_ANDROID;
+  const alt = document.getElementById("prnAltRow"), rb = document.getElementById("rawbtBtn"), sb = document.getElementById("serialBtn");
+  if(rb) rb.style.display = showRaw ? "block" : "none";
+  if(sb) sb.style.display = showSer ? "block" : "none";
+  if(alt) alt.style.display = (showRaw || showSer) ? "flex" : "none";
+}
+
+// ── Bluetooth (BLE) ──
+async function prnFindChar(server){
+  const writable = c => c.properties.write || c.properties.writeWithoutResponse;
+  for(const p of PRN_BLE){
+    let svc;
+    try{ svc = await server.getPrimaryService(p.s); }catch(e){ continue; }
+    try{ const c = await svc.getCharacteristic(p.c); if(writable(c)) return c; }catch(e){}
+    try{ for(const c of await svc.getCharacteristics()) if(writable(c)) return c; }catch(e){}
+  }
+  try{
+    for(const svc of await server.getPrimaryServices()){
+      try{ for(const c of await svc.getCharacteristics()) if(writable(c)) return c; }catch(e){}
+    }
+  }catch(e){}
+  return null;
+}
+
+async function prnAttach(dev){
+  if(btDevice && btDevice !== dev) btDevice.removeEventListener("gattserverdisconnected", onBTDisconnect);
+  btDevice = dev; btChar = null;
+  dev.removeEventListener("gattserverdisconnected", onBTDisconnect);
+  dev.addEventListener("gattserverdisconnected", onBTDisconnect);
+  prnUI("Connecting to " + (dev.name || "printer") + "...", "var(--amber)", "Connecting...", PRN_BLUE, true);
+  let server = null;
+  for(let a = 0; a < 3 && !server; a++){
+    try{ server = dev.gatt.connected ? dev.gatt : await dev.gatt.connect(); }
+    catch(e){ await prnSleep(500); }
+  }
+  if(!server) throw new Error("Printer not reachable — switch it ON");
+  const ch = await prnFindChar(server);
+  if(!ch){
+    try{ dev.gatt.disconnect(); }catch(e){}
+    throw new Error("No print channel — pick the printer, not another device");
+  }
+  btChar = ch;
+  prnRefreshStatus();
+}
+
+// Opens the Bluetooth device picker. Must run straight from a button tap.
+async function prnPickAndConnect(){
+  if(!navigator.bluetooth){ prnRefreshStatus(); toast("⚠️ " + prnNoBleReason()); return false; }
+  prnBusy = true;
+  prnUI("Choose your printer (PSF210)...", "var(--amber)", "Scanning...", PRN_BLUE, true);
+  let dev;
+  try{
+    dev = await navigator.bluetooth.requestDevice({acceptAllDevices:true, optionalServices:PRN_BLE.map(p => p.s)});
+  }catch(e){
+    prnBusy = false;
+    prnRefreshStatus();
+    const m = String((e && e.message) || e);
+    if(/adapter/i.test(m)) toast("⚠️ Turn ON Bluetooth and try again");
+    else if(e && e.name === "NotFoundError") toast("No printer selected");
+    else if(e && e.name === "SecurityError") toast("⚠️ Bluetooth permission blocked");
+    else toast("❌ " + m.slice(0, 60));
+    return false;
+  }
+  try{
+    await prnAttach(dev);
+    try{ localStorage.setItem(LS_PRINTER, JSON.stringify({id:dev.id, name:dev.name || ""})); }catch(e){}
+    toast("✅ " + (dev.name || "Printer") + " connected & ready!");
+    return true;
+  }catch(e){
+    if(btDevice === dev){ dev.removeEventListener("gattserverdisconnected", onBTDisconnect); btDevice = null; }
+    btChar = null;
+    const m = String((e && e.message) || e);
+    prnUI("❌ " + m.slice(0, 45), "var(--red)", "🔵 Retry", PRN_BLUE, false);
+    toast("❌ " + m.slice(0, 60));
+    return false;
+  }finally{ prnBusy = false; }
 }
 
 async function connectBT(){
-  if(!navigator.bluetooth){
-    toast('⚠️ Web Bluetooth not supported. Open in Chrome (Android/Desktop).');
-    return;
-  }
-  const btn = document.getElementById('btConnBtn');
-  const statusTxt = document.getElementById('btStatusTxt');
-  btn.textContent = 'Scanning...'; btn.disabled = true;
-  statusTxt.textContent = 'Scanning for printers...';
-  statusTxt.style.color = 'var(--amber)';
-
-  // All known ESC/POS BLE service UUIDs (covers F2C, Rongta, Xprinter, Goojprt, Peripage, Generic)
-  const KNOWN_SERVICES = [
-    '000018f0-0000-1000-8000-00805f9b34fb', // Generic BT printer (F2C, many clones)
-    '49535343-fe7d-4ae5-8fa9-9fafd205e455', // ISSC transparent BLE UART
-    '0000ff00-0000-1000-8000-00805f9b34fb', // Common chinese BLE printer
-    'e7810a71-73ae-499d-8c15-faa9aef0c3f2', // Peripage / Goojprt
-    '000018f0-0000-1000-8000-00805f9b34fb', // Rongta
-    '6e400001-b5a3-f393-e0a9-e50e24dcca9e', // Nordic UART (some printers)
-    '0000ffe0-0000-1000-8000-00805f9b34fb', // HM-10 BLE module (many cheap printers)
-    '00001101-0000-1000-8000-00805f9b34fb', // Classic BT SPP (fallback)
-  ];
-  const KNOWN_CHARS = [
-    '00002af1-0000-1000-8000-00805f9b34fb',
-    '49535343-8841-43f4-a8d4-ecbe34729bb3',
-    '0000ff02-0000-1000-8000-00805f9b34fb',
-    'bef8d6c9-9c21-4c9e-b632-bd58c1009f9f',
-    '6e400002-b5a3-f393-e0a9-e50e24dcca9e', // Nordic UART TX
-    '0000ffe1-0000-1000-8000-00805f9b34fb', // HM-10 char
-    '00002af1-0000-1000-8000-00805f9b34fb',
-  ];
-
-  try {
-    // acceptAllDevices = true shows ALL nearby BT devices — user picks their printer
-    btDevice = await navigator.bluetooth.requestDevice({
-      acceptAllDevices: true,
-      optionalServices: KNOWN_SERVICES
-    });
-
-    btDevice.addEventListener('gattserverdisconnected', onBTDisconnect);
-    statusTxt.textContent = 'Connecting to ' + (btDevice.name || 'device') + '...';
-    const server = await btDevice.gatt.connect();
-
-    let foundChar = null;
-
-    // Strategy 1: Try all known service+char combos
-    for(const sUUID of KNOWN_SERVICES){
-      if(foundChar) break;
-      try{
-        const svc = await server.getPrimaryService(sUUID);
-        for(const cUUID of KNOWN_CHARS){
-          try{
-            const c = await svc.getCharacteristic(cUUID);
-            if(c.properties.write || c.properties.writeWithoutResponse){
-              foundChar = c; break;
-            }
-          }catch{}
-        }
-      }catch{}
-    }
-
-    // Strategy 2: Scan ALL services → find first writable char
-    if(!foundChar){
-      try{
-        const allSvcs = await server.getPrimaryServices();
-        for(const svc of allSvcs){
-          if(foundChar) break;
-          try{
-            const chars = await svc.getCharacteristics();
-            for(const c of chars){
-              if(c.properties.write || c.properties.writeWithoutResponse){
-                foundChar = c; break;
-              }
-            }
-          }catch{}
-        }
-      }catch{}
-    }
-
-    if(!foundChar) throw new Error('No writable channel found on this device. Make sure it is a thermal printer.');
-
-    btChar = foundChar;
-    const name = btDevice.name || 'Printer';
-    statusTxt.textContent = '🟢 ' + name + ' ready';
-    statusTxt.style.color = '#10b981';
-    btn.textContent = '✓ ' + name;
-    btn.style.background = 'linear-gradient(135deg,#10b981,#0891b2)';
-    btn.disabled = false;
-    toast('✅ ' + name + ' connected & ready!');
-
-  } catch(e){
-    btChar = null; btDevice = null;
-    statusTxt.style.color = 'var(--red)';
-    btn.disabled = false; btn.style.background = '';
-    if(e.name === 'NotFoundError'){
-      statusTxt.textContent = 'No device selected';
-      btn.textContent = '🔵 Connect';
-      toast('No device selected');
-    } else if(e.name === 'SecurityError'){
-      statusTxt.textContent = 'Permission denied';
-      btn.textContent = '🔵 Connect';
-      toast('⚠️ Bluetooth permission denied');
-    } else {
-      statusTxt.textContent = e.message.slice(0,40);
-      btn.textContent = '🔵 Retry';
-      toast('❌ ' + e.message.slice(0,50));
-    }
-  }
+  if(btPrinting || prnBusy) return false;
+  return prnPickAndConnect();
 }
 
 function onBTDisconnect(){
+  const wasReady = !!btChar;
   btChar = null;
-  const st = document.getElementById('btStatusTxt');
-  const cb = document.getElementById('btConnBtn');
-  if(st){ st.textContent = 'Printer disconnected'; st.style.color = 'var(--red)'; }
-  if(cb){ cb.textContent = '🔵 Reconnect'; cb.disabled = false; }
-  toast('🔌 Printer disconnected');
+  prnRefreshStatus();
+  if(wasReady && !btPrinting) toast("🔌 Printer sleeping — BT Print will reconnect");
 }
 
-let btPrinting = false;
-async function doBTPrint(){
-  if(btPrinting) return; // ignore taps while a print is in progress
-  if(!curReceipt){ toast('No receipt to print'); return; }
-  if(!btChar){
-    toast('⚠️ Connect printer first → tap 📡 BT Print area → Connect');
-    // Show BT status bar
-    document.getElementById('btStatus').style.display = 'flex';
-    return;
+// Send in 20-byte packets: fits the smallest BLE packet size, so no bytes are ever dropped.
+async function prnSendBLE(data){
+  const withResp = !!btChar.properties.write;
+  for(let i = 0; i < data.length; i += 20){
+    const chunk = data.slice(i, i + 20);
+    for(let a = 0; ; a++){
+      try{
+        if(withResp) await (btChar.writeValueWithResponse ? btChar.writeValueWithResponse(chunk) : btChar.writeValue(chunk));
+        else await btChar.writeValueWithoutResponse(chunk);
+        break;
+      }catch(e){
+        if(a >= 2 || !btDevice || !btDevice.gatt.connected) throw e;
+        await prnSleep(250);
+      }
+    }
+    if(!withResp) await prnSleep(25);
   }
-  const btn = document.querySelector('[onclick="doBTPrint()"]');
+}
+
+async function doBTPrint(){
+  if(btPrinting || prnBusy) return;
+  if(!curReceipt){ toast("No receipt to print"); return; }
+  if(!navigator.bluetooth){ prnRefreshStatus(); toast("⚠️ " + prnNoBleReason()); return; }
+  const btn = document.getElementById("btPrintBtn");
+  const setBtn = (t, d) => { if(btn){ btn.textContent = t; btn.disabled = d; } };
   btPrinting = true;
-  try {
-    btn.textContent = '📡 Printing...'; btn.disabled = true;
-    const data = buildReceipt(curReceipt);
-    // Small chunks + write-with-response = flow control.
-    // Cheap BLE printers (F2C BT-SRT-58 etc.) have tiny RX buffers (~256B);
-    // large fast chunks overflow the buffer and bytes get silently dropped
-    // (missing items, merged half-lines, garbled receipts).
-    const chunkSize = 100;
-    for(let i = 0; i < data.length; i += chunkSize){
-      const chunk = data.slice(i, i + chunkSize);
-      let sent = false;
-      for(let attempt = 0; attempt < 3 && !sent; attempt++){
-        try {
-          if(btChar.properties.write){
-            await btChar.writeValue(chunk); // ACK'd write — printer paces us
-          } else {
-            await btChar.writeValueWithoutResponse(chunk);
-          }
-          sent = true;
-        } catch(err){
-          if(attempt === 2) throw err;
-          await new Promise(r => setTimeout(r, 200)); // let printer buffer drain, retry
+  try{
+    if(!(btChar && btDevice && btDevice.gatt.connected)){
+      setBtn("📡 Connecting...", true);
+      if(!btDevice){
+        if(!(await prnPickAndConnect())) return;
+      } else {
+        try{ await prnAttach(btDevice); }
+        catch(e){
+          prnUI("Printer not reachable — switch ON, tap Connect", "var(--red)", "🔵 Connect", PRN_BLUE, false);
+          toast("⚠️ Printer not reachable — switch it ON");
+          return;
         }
       }
-      await new Promise(r => setTimeout(r, 60)); // give printer time to process chunk
     }
-    toast('✅ Printed successfully!');
-  } catch(e){
-    toast('❌ Print failed: ' + e.message);
+    setBtn("📡 Printing...", true);
+    await prnSendBLE(buildReceipt(curReceipt));
+    toast("✅ Printed successfully!");
+  }catch(e){
+    toast("❌ Print failed — tap BT Print again");
+    console.log("BT print error:", e);
+  }finally{
+    btPrinting = false;
+    setBtn("📡 BT Print", false);
+    prnRefreshStatus();
   }
-  btPrinting = false;
-  btn.textContent = '📡 BT Print'; btn.disabled = false;
 }
 
-// Show BT status bar when receipt opens - override showReceipt
+// ── RawBT (Android app) — works with Classic-Bluetooth-only printers ──
+function doRawBTPrint(){
+  if(!curReceipt){ toast("No receipt to print"); return; }
+  const data = buildReceipt(curReceipt);
+  let bin = "";
+  for(let i = 0; i < data.length; i++) bin += String.fromCharCode(data[i]);
+  window.location.href = "intent:base64," + btoa(bin) + "#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;";
+}
+
+// ── USB / COM port (PC: Chrome or Edge) ──
+async function doSerialPrint(){
+  if(!curReceipt){ toast("No receipt to print"); return; }
+  if(!navigator.serial){ toast("⚠️ USB/COM printing needs Chrome or Edge on PC"); return; }
+  if(btPrinting || prnBusy) return;
+  const btn = document.getElementById("serialBtn");
+  btPrinting = true;
+  if(btn){ btn.disabled = true; btn.textContent = "💻 Printing..."; }
+  try{
+    if(!serialPort) serialPort = await navigator.serial.requestPort();
+    if(!serialPort.writable) await serialPort.open({baudRate:9600});
+    const w = serialPort.writable.getWriter();
+    try{ await w.write(buildReceipt(curReceipt)); }
+    finally{ w.releaseLock(); }
+    toast("✅ Printed successfully!");
+  }catch(e){
+    if(e && e.name === "NotFoundError") toast("No port selected");
+    else {
+      toast("❌ USB/COM print failed — try again");
+      console.log("Serial print error:", e);
+      try{ if(serialPort) await serialPort.close(); }catch(_){}
+      serialPort = null;
+    }
+  }finally{
+    btPrinting = false;
+    if(btn){ btn.disabled = false; btn.textContent = "💻 USB / COM Print"; }
+  }
+}
+
+// Remember the last Bluetooth printer (Chrome versions that support it) so no re-pairing is needed.
+async function prnRestore(){
+  try{
+    const saved = JSON.parse(localStorage.getItem(LS_PRINTER) || "null");
+    if(!saved || !navigator.bluetooth || !navigator.bluetooth.getDevices) return;
+    const d = (await navigator.bluetooth.getDevices()).find(x => x.id === saved.id);
+    if(d && !btDevice){
+      btDevice = d;
+      d.addEventListener("gattserverdisconnected", onBTDisconnect);
+      prnRefreshStatus();
+    }
+  }catch(e){}
+}
+prnRestore();
+
+// Refresh printer status every time a receipt opens
 const _origShowReceipt = showReceipt;
 showReceipt = function(o){
   _origShowReceipt(o);
-  const bs = document.getElementById('btStatus');
-  if(bs) bs.style.display = 'flex';
-  // Update status if already connected
-  if(btChar && btDevice){
-    const st = document.getElementById('btStatusTxt');
-    const cb = document.getElementById('btConnBtn');
-    if(st){ st.textContent = '🔵 ' + (btDevice.name||'Printer') + ' connected'; st.style.color = '#10b981'; }
-    if(cb){ cb.textContent = '✓ Connected'; cb.style.background = 'linear-gradient(135deg,#10b981,#0891b2)'; }
-  }
+  prnRefreshStatus();
 };
 
 // ══════════════════════════════════════════════════════
