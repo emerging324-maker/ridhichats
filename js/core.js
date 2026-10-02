@@ -34,7 +34,7 @@ const typeLabel = id => (ORDER_TYPES.find(t => t.id === id) || ORDER_TYPES[0]).l
 
 // ── STORAGE KEYS (unchanged from v2 so existing shop data carries over) ──
 const LS = {O:"rc_orders",U:"rc_url",T:"rc_tok",TD:"rc_tok_date",COMBOS:"rc_combos",EXP:"rc_expenses",CMENU:"rc_custom_menu",CITEMS:"rc_custom_items",
-  SET:"rc_settings",OVER:"rc_item_over",HELD:"rc_held",OOS:"rc_oos",QUEUE:"rc_queue",KIT:"rc_kitchen",PRN:"rc_printer"};
+  SET:"rc_settings",OVER:"rc_item_over",HELD:"rc_held",OOS:"rc_oos",QUEUE:"rc_queue",KIT:"rc_kitchen",PRN:"rc_printer",RESET:"rc_reset"};
 
 // ── HELPERS ──
 const $ = id => document.getElementById(id);
@@ -178,6 +178,21 @@ let gstOn = false, disc = 0, discType = "flat", pm = "cash";
 let activeCat = "Samosa", menuMode = "", role = null;
 let curReceipt = null, sheetUrl = "", sheetOn = false;
 let customers = new Map(), favIds = [];
+
+// ── ONE-TIME CLEAN START (3 Oct 2026) ──
+// The first time a device opens this version it deletes the old bills, expenses, held bills,
+// kitchen list, upload queue and token number, and moves to the built-in (new) Sheet link.
+// Menu, prices, photos, settings, logins and the printer are kept. It never runs twice on a device.
+// To do another clean start in future, change DATA_RESET_ID.
+const DATA_RESET_ID = "2026-10-03";
+async function oneTimeReset(){
+  if(localStorage.getItem(LS.RESET) === DATA_RESET_ID) return;
+  try{
+    if(DB.ok) await DB.clear("orders");
+    [LS.O, LS.EXP, LS.HELD, LS.KIT, LS.QUEUE, LS.T, LS.TD, LS.U].forEach(k => localStorage.removeItem(k));
+    localStorage.setItem(LS.RESET, DATA_RESET_ID);
+  }catch(e){} // not marked done, so it tries again next time the app opens
+}
 
 // ── ORDERS: load / save ──
 function normOrder(o){
@@ -403,6 +418,8 @@ async function boot(){
   loadSettings(); applyShopName();
   $("verTxt").textContent = (S.shopName || "Ridhi Chats") + " POS v" + APP_VERSION;
   await DB.open();
+  await oneTimeReset();
+  queue = lsGet(LS.QUEUE, []); if(!Array.isArray(queue)) queue = []; // re-read: the clean start may have just emptied it
   loadMenuStores();
   try{ (await DB.entries("images")).forEach(([k, v]) => { IMGS[k] = v; }); }catch(e){}
   buildMenu();

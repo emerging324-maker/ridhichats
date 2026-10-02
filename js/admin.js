@@ -474,8 +474,7 @@ function renderSettings(){
       + (sheetOn ? sw("Share Kitchen orders between devices", "Counter phone and kitchen tablet show the same live orders", "kitchenSync") : "")
       + '<div class="muted small">' + (queue.length ? "⏳ " + queue.length + " item(s) waiting to upload — they go automatically when the internet is back. " : "") + 'Two-device kitchen sync and cancel sync need the new script in <b>RidhiChats_AppScript.gs</b> (see the user manual).</div></div>'
     + '<div class="card" style="margin-bottom:12px;"><h3>💾 Backup</h3><div class="muted small" style="margin-bottom:10px;">Everything is stored on this device. Download a backup file regularly and keep it in Google Drive or WhatsApp it to yourself.</div>'
-      + '<div class="row"><button class="btn green sm" onclick="backupNow()">⬇️ Download backup</button><button class="btn ghost sm" onclick="document.getElementById(\'restoreFile\').click()">⬆️ Restore from backup</button><input type="file" id="restoreFile" accept=".json,application/json" class="hide" onchange="restoreBackup(this)"/></div>'
-      + '<div class="sw-row" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;"><div><b>Clean start</b><span class="d">Delete all bills, expenses and customers on this device. Menu, photos and settings stay.</span></div><button class="btn danger sm" onclick="eraseAllData()">Erase all data</button></div></div>'
+      + '<div class="row"><button class="btn green sm" onclick="backupNow()">⬇️ Download backup</button><button class="btn ghost sm" onclick="document.getElementById(\'restoreFile\').click()">⬆️ Restore from backup</button><input type="file" id="restoreFile" accept=".json,application/json" class="hide" onchange="restoreBackup(this)"/></div></div>'
     + '<div class="card"><h3>ℹ️ About</h3><div class="muted small">Ridhi Chats POS v' + APP_VERSION + " · " + orders.length + " bills · " + expenses.length + " expenses · " + Object.keys(IMGS).length + " own photos · storage: " + (DB.ok ? "device database" : "browser storage") + "</div></div>";
 }
 // Read the typed fields into S (kept in memory until "Save changes" is tapped)
@@ -534,6 +533,7 @@ function restoreBackup(input){
     try{
       Object.keys(localStorage).filter(k => k.startsWith("rc_")).forEach(k => localStorage.removeItem(k));
       Object.entries(d.ls || {}).forEach(([k, v]) => { if(k.startsWith("rc_")) localStorage.setItem(k, v); });
+      localStorage.setItem(LS.RESET, DATA_RESET_ID); // a restored backup is kept, not wiped by the one-time clean start
       const os = d.orders.map(normOrder);
       if(DB.ok){
         await DB.clear("orders"); await DB.bulk("orders", os);
@@ -544,21 +544,6 @@ function restoreBackup(input){
     }catch(e){ busy(false); toast("❌ Restore failed: " + (e && e.message || e)); }
   };
   rd.readAsText(f);
-}
-
-// ── CLEAN START: erase bills, expenses, customers, held bills, kitchen and the token counter ──
-// Menu, prices, photos, settings, logins, the Sheet link and the printer are kept.
-async function eraseAllData(){
-  if(!needOwner()) return;
-  const typed = prompt("CLEAN START\n\nThis deletes from THIS device:\n• all " + orders.length + " bills and the customer list\n• all " + expenses.length + " expenses\n• held bills, kitchen list, token number\n\nKept: menu, prices, photos, settings, logins.\nBills already in the connected Google Sheet are NOT deleted and will download again.\n\nThis cannot be undone. Type ERASE to continue:");
-  if(typed === null) return;
-  if(typed.trim().toUpperCase() !== "ERASE"){ toast("Nothing was deleted"); return; }
-  busy(true, "Erasing...");
-  try{
-    if(DB.ok) await DB.clear("orders");
-    [LS.O, LS.EXP, LS.HELD, LS.KIT, LS.QUEUE, LS.T, LS.TD].forEach(k => localStorage.removeItem(k));
-    location.reload();
-  }catch(e){ busy(false); toast("❌ Could not erase: " + (e && e.message || e)); }
 }
 
 // ── PWA: offline + install ──
