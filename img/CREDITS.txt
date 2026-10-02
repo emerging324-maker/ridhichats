@@ -1,0 +1,226 @@
+Dish photos in this folder are from Wikimedia Commons, used under the licence shown.
+They are stock photos of each dish type, not photos of Ridhi Chats dishes.
+Replace any of them inside the app: Billing > Edit menu > tap an item > Change photo.
+
+samosa.jpg
+  File:Indian Samosa by clumsy home chef.jpg
+  Author: ClumsyHomeChef
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Indian_Samosa_by_clumsy_home_chef.jpg
+
+cutlet.jpg
+  File:Vegetable Cutlet From India.jpg
+  Author: Ntarch
+  Licence: CC0
+  Source: https://commons.wikimedia.org/wiki/File:Vegetable_Cutlet_From_India.jpg
+
+tikki.jpg
+  File:Aloo Tikki served with chutneys.jpg
+  Author: Raveesh Vyas from [Ahmedabad, Noida], India
+  Licence: CC BY-SA 2.0
+  Source: https://commons.wikimedia.org/wiki/File:Aloo_Tikki_served_with_chutneys.jpg
+
+sandwich.jpg
+  File:Vegetable Sandwich Mumbai-Style.jpg
+  Author: Nags Viswanathan
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Vegetable_Sandwich_Mumbai-Style.jpg
+
+streetsandwich.jpg
+  File:Vegetable Sandwich making 2.jpg
+  Author: Gannu03
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Vegetable_Sandwich_making_2.jpg
+
+grill.jpg
+  File:Brisket and grilled cheese sandwich with a side of French fries.jpg
+  Author: Ser Amantio di Nicolao
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Brisket_and_grilled_cheese_sandwich_with_a_side_of_French_fries.jpg
+
+grill2.jpg
+  File:Broccoli cheddar soup and grilled cheese sandwich.jpg
+  Author: Photos of Japan
+  Licence: CC0
+  Source: https://commons.wikimedia.org/wiki/File:Broccoli_cheddar_soup_and_grilled_cheese_sandwich.jpg
+
+club.jpg
+  File:Brisket and grilled cheese sandwich with a side of French fries 2.jpg
+  Author: Ser Amantio di Nicolao
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Brisket_and_grilled_cheese_sandwich_with_a_side_of_French_fries_2.jpg
+
+toast.jpg
+  File:Cheese on toast hi res.jpg
+  Author: Zorin90
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Cheese_on_toast_hi_res.jpg
+
+toast2.jpg
+  File:Cheese on toast.jpg
+  Author: Photograph by Mike Peel (www.mikepeel.net).
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Cheese_on_toast.jpg
+
+pizza.jpg
+  File:Vegetable pizza food.jpg
+  Author: Waran R Samay
+  Licence: CC BY 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Vegetable_pizza_food.jpg
+
+pizza2.jpg
+  File:Eq it-na pizza-margherita sep2005 sml.jpg
+  Author: Valerio Capello at English Wikipedia
+  Licence: CC BY-SA 3.0
+  Source: https://commons.wikimedia.org/wiki/File:Eq_it-na_pizza-margherita_sep2005_sml.jpg
+
+cornpizza.jpg
+  File:Corn Pizza.jpg
+  Author: Solatido
+  Licence: CC0
+  Source: https://commons.wikimedia.org/wiki/File:Corn_Pizza.jpg
+
+panipuri.jpg
+  File:Golgappa Pani Puri India.jpg
+  Author: Yusuke Kawasaki
+  Licence: CC BY 2.0
+  Source: https://commons.wikimedia.org/wiki/File:Golgappa_Pani_Puri_India.jpg
+
+masalapuri.jpg
+  File:Masala Poori made by street vendors in Bangalore, India.jpg
+  Author: Amrith Raj
+  Licence: CC BY-SA 3.0
+  Source: https://commons.wikimedia.org/wiki/File:Masala_Poori_made_by_street_vendors_in_Bangalore,_India.jpg
+
+bhel.jpg
+  File:BHEL PURI PUNE 050.jpg
+  Author: Manoj2095
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:BHEL_PURI_PUNE_050.jpg
+
+papdi.jpg
+  File:Papri Pakori Chat.JPG
+  Author: Ravi Talwar
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Papri_Pakori_Chat.JPG
+
+dahipapdi.jpg
+  File:Bhalla Papri Chaat with saunth chutney.jpg
+  Author: Nitin Badhwar from Dubai, UAE
+  Licence: CC BY-SA 2.0
+  Source: https://commons.wikimedia.org/wiki/File:Bhalla_Papri_Chaat_with_saunth_chutney.jpg
+
+nippat.jpg
+  File:Nippattu (Rice crackers).jpg
+  Author: BHARATHESHA ALASANDEMAJALU
+  Licence: CC BY-SA 3.0
+  Source: https://commons.wikimedia.org/wiki/File:Nippattu_(Rice_crackers).jpg
+
+ragda.jpg
+  File:Ragda Patties.JPG
+  Author: Ravi Talwar
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Ragda_Patties.JPG
+
+sevpuri.jpg
+  File:Sev puri 1.jpg
+  Author: Harmeet
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Sev_puri_1.jpg
+
+cornchaat.jpg
+  File:Spicy.JPG
+  Author: Kishore21
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Spicy.JPG
+
+corncanopy.jpg
+  File:Corn papdi chaat.jpg
+  Author: Kanikatwl
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Corn_papdi_chaat.jpg
+
+dahipuri.jpg
+  File:Odia Style Dahi bara Puri Odisha-IMG 953.jpg
+  Author: Subhransuphotography
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Odia_Style_Dahi_bara_Puri_Odisha-IMG_953.jpg
+
+fries.jpg
+  File:DoughnDolce Beef Sandwich.jpg
+  Author: Vincent60030
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:DoughnDolce_Beef_Sandwich.jpg
+
+perifries.jpg
+  File:Truffle oil french fries (33024792848).jpg
+  Author: Tony Webster from Minneapolis, Minnesota, United States
+  Licence: CC BY-SA 2.0
+  Source: https://commons.wikimedia.org/wiki/File:Truffle_oil_french_fries_(33024792848).jpg
+
+wrap.jpg
+  File:Chicken roll with vegetables & goat cheese (5742199145).jpg
+  Author: Luca Nebuloni from Milan, Italy
+  Licence: CC BY 2.0
+  Source: https://commons.wikimedia.org/wiki/File:Chicken_roll_with_vegetables_%26_goat_cheese_(5742199145).jpg
+
+roll.jpg
+  File:Paneer kathi roll homemade.jpg
+  Author: Shafana jasmine
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Paneer_kathi_roll_homemade.jpg
+
+roll2.jpg
+  File:Chicken-kathi-roll-recipe.jpg
+  Author: Vivekpat30
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Chicken-kathi-roll-recipe.jpg
+
+bluedrink.jpg
+  File:Blue Lagoon, Le Splendid DAX ( FRANCE ).jpg
+  Author: Le splendid
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Blue_Lagoon,_Le_Splendid_DAX_(_FRANCE_).jpg
+
+jeera.jpg
+  File:Jal zeerra.jpg
+  Author: Rahul Verma
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Jal_zeerra.jpg
+
+lemonade.jpg
+  File:Fresh Lime.JPG
+  Author: Siddhantsahni28
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Fresh_Lime.JPG
+
+mint.jpg
+  File:Homemade Mint Lemonade,Bangladesh.jpg
+  Author: Evening42
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Homemade_Mint_Lemonade,Bangladesh.jpg
+
+gingerlime.jpg
+  File:Ice Lemon (48063167602).jpg
+  Author: Theo Crazzolara
+  Licence: CC BY 2.0
+  Source: https://commons.wikimedia.org/wiki/File:Ice_Lemon_(48063167602).jpg
+
+falooda.jpg
+  File:Falooda of salem.jpg
+  Author: Thamizhpparithi Maari
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Falooda_of_salem.jpg
+
+golisoda.jpg
+  File:Goli soda with lemon.jpg
+  Author: Firoz B
+  Licence: CC BY-SA 4.0
+  Source: https://commons.wikimedia.org/wiki/File:Goli_soda_with_lemon.jpg
+
+coldcoffee.jpg
+  File:Iced Coffee in Glass - Sunshine Coffee - Laramie Cafe (53838344552).jpg
+  Author: Tony Webster
+  Licence: CC BY 2.0
+  Source: https://commons.wikimedia.org/wiki/File:Iced_Coffee_in_Glass_-_Sunshine_Coffee_-_Laramie_Cafe_(53838344552).jpg
+
