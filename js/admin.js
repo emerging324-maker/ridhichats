@@ -356,13 +356,18 @@ async function connectSheet(){
   try{
     await fetch(url, {method:"GET", mode:"no-cors"});
     sheetUrl = url; sheetOn = true; localStorage.setItem(LS.U, url); kitRemote = null;
-    toast("✅ Sheet connected");
-  }catch(e){ toast("❌ Could not reach that link — check internet and the deployment"); }
-  busy(false); updateSyncUI(); reSettings();
+  }catch(e){ busy(false); toast("❌ Could not reach that link — check internet and the deployment"); return; }
+  busy(false); updateSyncUI(); flushQueue();
+  await fetchSheet(); // bring the Sheet's bills and expenses onto this device straight away
+  reSettings();
+}
+function useDefaultSheet(){
+  sheetUrl = DEFAULT_SHEET_URL; sheetOn = true; localStorage.removeItem(LS.U); kitRemote = null; // no saved link = built-in link
+  updateSyncUI(); flushQueue(); reSettings(); fetchSheet();
 }
 function disconnectSheet(){
   if(!confirm("Disconnect the Google Sheet? Bills stay on this device.")) return;
-  sheetUrl = ""; sheetOn = false; localStorage.removeItem(LS.U); queue = []; saveQueue();
+  sheetUrl = ""; sheetOn = false; localStorage.setItem(LS.U, ""); queue = []; saveQueue(); // "" = stay off, do not fall back to the built-in link
   updateSyncUI(); renderSettings(); toast("🔌 Sheet disconnected");
 }
 // Upload every bill and expense on this device (used once after installing the new Apps Script).
@@ -373,25 +378,64 @@ function pushAllToSheet(){
   saveQueue(); updateSyncUI(); flushQueue(); reSettings();
   toast("⬆️ Uploading " + items.length + " records in the background");
 }
-async function fetchSheet(){
-  if(!sheetOn){ toast("⚠️ Connect the Sheet first"); return; }
-  busy(true, "Fetching bills from Google Sheets...");
+// Download bills (and expenses) from the Sheet and merge them into this device.
+// Runs by itself after connecting, when the app opens and every 2 minutes; "Fetch" runs it at once.
+let pulling = false, lastPull = null;
+async function pullSheet(){
+  if(!sheetOn || pulling || navigator.onLine === false) return null;
+  pulling = true;
+  const res = {ok:false, bills:0, newBills:0, newExp:0, expSupported:false};
   try{
     const data = await jsonp(sheetUrl, {action:"getOrders"});
-    if(data && Array.isArray(data.orders)){
-      let added = 0;
-      data.orders.forEach(r => {
-        if(!r || r.id == null) return;
-        const ex = findOrder(r.id);
-        if(!ex){ orders.push(normOrder(r)); added++; }
-        else if(r.status === "cancelled" && isLive(ex)){ ex.status = "cancelled"; ex.cancelReason = r.cancelReason || ""; }
-      });
-      sortOrders(); await saveAllOrders(); rebuildIndex();
-      toast("✅ Sheet has " + data.orders.length + " bills · " + added + " new on this device");
-    } else toast("📋 No bills in the Sheet yet");
-  }catch(e){ toast("⚠️ Fetch failed — check internet / Apps Script deployment"); }
+    if(!data || !Array.isArray(data.orders)) return res;
+    res.ok = true; res.bills = data.orders.length;
+    const changed = [];
+    data.orders.forEach(r => {
+      if(!r || r.id == null) return;
+      const ex = findOrder(r.id);
+      if(!ex){ const o = normOrder(r); delete o.kitchenStatus; orders.push(o); changed.push(o); res.newBills++; }
+      else if(r.status === "cancelled" && isLive(ex)){ ex.status = "cancelled"; ex.cancelReason = r.cancelReason || ""; changed.push(ex); }
+    });
+    try{
+      const e = await jsonp(sheetUrl, {action:"getExpenses"});
+      if(e && Array.isArray(e.expenses)){
+        res.expSupported = true;
+        e.expenses.forEach(x => {
+          if(!x || x.id == null || x.id === "" || expenses.some(y => String(y.id) === String(x.id))) return;
+          const iso = toISO(x.dateISO), p = iso.split("-");
+          expenses.push({id:String(x.id), desc:String(x.desc || ""), amount:r2(x.amount), dateISO:iso, date:p.length === 3 ? +p[2] + "/" + +p[1] + "/" + p[0] : "",
+            category:String(x.category || "other"), paidVia:String(x.paidVia || "cash")});
+          res.newExp++;
+        });
+        if(res.newExp){ expenses.sort((a,b) => expISO(b) > expISO(a) ? 1 : -1); lsSet(LS.EXP, expenses); }
+      }
+    }catch(err){}
+    if(changed.length){
+      sortOrders();
+      if(DB.ok) await DB.bulk("orders", changed).catch(() => toast("⚠️ Could not save bills"));
+      else lsSet(LS.O, orders);
+      rebuildIndex();
+    }
+    lastPull = new Date();
+    if(changed.length || res.newExp){
+      if(curView === "dashboard") renderDash();
+      if(curView === "history") renderHist();
+      if(curView === "expenses") renderExp();
+      if(curView === "customers") renderCustomers();
+      if(curView === "pos") renderCats();
+    }
+    return res;
+  }catch(e){ return res; }
+  finally{ pulling = false; }
+}
+async function fetchSheet(){
+  if(!sheetOn){ toast("⚠️ Connect the Sheet first"); return; }
+  busy(true, "Getting bills from Google Sheets...");
+  const r = await pullSheet();
   busy(false);
-  if(curView === "dashboard") renderDash();
+  if(!r) toast("⏳ Already updating — try again in a moment");
+  else if(!r.ok) toast("⚠️ Could not reach the Sheet — check internet and the Web App link");
+  else toast("✅ Sheet: " + r.bills + " bills · " + r.newBills + " new" + (r.expSupported ? " · " + r.newExp + " new expenses" : " · update Apps Script to get expenses too"), 5000);
   if(curView === "settings") reSettings();
 }
 
@@ -425,6 +469,7 @@ function renderSettings(){
     + '<div class="card" style="margin-bottom:12px;"><h3>📊 Google Sheet ' + (sheetOn ? '<span class="tag green">connected</span>' : '<span class="tag">not connected</span>') + "</h3>"
       + '<div class="field"><div class="lbl">Apps Script Web App URL</div><textarea class="inp" id="setUrl" rows="2" placeholder="https://script.google.com/macros/s/.../exec" style="font-family:monospace;font-size:12px;">' + esc(sheetUrl) + "</textarea></div>"
       + '<div class="row" style="margin-bottom:8px;"><button class="btn primary sm" onclick="connectSheet()">' + (sheetOn ? "Update link" : "Connect") + "</button>"
+      + (sheetUrl !== DEFAULT_SHEET_URL ? '<button class="btn ghost sm" onclick="useDefaultSheet()">Use built-in link</button>' : "")
       + (sheetOn ? '<button class="btn ghost sm" onclick="fetchSheet()">Fetch bills from Sheet</button><button class="btn ghost sm" onclick="pushAllToSheet()">Send all bills to Sheet</button><button class="btn danger sm" onclick="disconnectSheet()">Disconnect</button>' : "") + "</div>"
       + (sheetOn ? sw("Share Kitchen orders between devices", "Counter phone and kitchen tablet show the same live orders", "kitchenSync") : "")
       + '<div class="muted small">' + (queue.length ? "⏳ " + queue.length + " item(s) waiting to upload — they go automatically when the internet is back. " : "") + 'Two-device kitchen sync and cancel sync need the new script in <b>RidhiChats_AppScript.gs</b> (see the user manual).</div></div>'

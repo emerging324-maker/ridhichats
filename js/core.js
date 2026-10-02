@@ -111,7 +111,9 @@ function sha256(str){
   return h.map(x => x.toString(16).padStart(8,"0")).join("");
 }
 const passHash = p => sha256("rc:" + p);
-const OWNER_DEFAULT_HASH = "ef6a77fcf392c92a0c8b6af9551353ad68a2d275f01b8e8b85a0ed0af347b67b"; // the shop's existing password
+// Built-in Google Sheet (Apps Script Web App). A link typed in Settings always takes priority.
+const DEFAULT_SHEET_URL = "https://script.google.com/macros/s/AKfycbwWSu5MsaeacOAQWJHTxCStc17gHkMMBD-ozy2r5zN7CBdFO_nKOYahEPdnwIyNDAkcGA/exec";
+const OWNER_DEFAULT_HASH ="ef6a77fcf392c92a0c8b6af9551353ad68a2d275f01b8e8b85a0ed0af347b67b"; // the shop's existing password
 
 // ── DATABASE (IndexedDB: bills + item photos; falls back to localStorage) ──
 const DB = {
@@ -407,7 +409,9 @@ async function boot(){
   await loadOrders();
   expenses = lsGet(LS.EXP, []); if(!Array.isArray(expenses)) expenses = [];
   held = lsGet(LS.HELD, []); if(!Array.isArray(held)) held = [];
-  sheetUrl = localStorage.getItem(LS.U) || ""; sheetOn = !!sheetUrl;
+  // Use the built-in Sheet link unless one was entered (or Disconnect was tapped) in Settings
+  const savedUrl = localStorage.getItem(LS.U);
+  sheetUrl = savedUrl === null ? DEFAULT_SHEET_URL : savedUrl; sheetOn = !!sheetUrl;
   rebuildIndex();
   activeCat = favIds.length ? FAV : Object.keys(MENU)[0];
   loadKitchen();
@@ -415,9 +419,10 @@ async function boot(){
   renderTypeSeg(); renderCats(); renderMenu(); renderCart();
   updateClock(); setInterval(updateClock, 30000);
   const t = isoToday();
-  ["hFrom","hTo","expFrom","expTo","dFrom","dTo"].forEach(id => { $(id).value = t; });
+  ["dFrom","dTo"].forEach(id => { $(id).value = t; }); // History and Expenses open on "All" (newest first)
   updateSyncUI(); flushQueue(); setInterval(flushQueue, 60000);
-  window.addEventListener("online", flushQueue);
+  pullSheet(); setInterval(pullSheet, 120000); // keep this device in step with the Sheet
+  window.addEventListener("online", () => { flushQueue(); pullSheet(); });
   prnRestore();
   pwaInit();
   setTimeout(() => $("loginPass").focus(), 300);

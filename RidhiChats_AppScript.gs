@@ -114,6 +114,17 @@ function readOrders_(fromRow) {
   return out;
 }
 
+function readExpenses_() {
+  var sh = sheet_(SH_EXP, EXP_COLS);
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  var tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+  return sh.getRange(2, 1, last - 1, EXP_COLS.length).getValues().filter(function (r) { return r[0] !== ''; }).map(function (r) {
+    var iso = r[1] instanceof Date ? Utilities.formatDate(r[1], tz, 'yyyy-MM-dd') : String(r[1]);
+    return {id: String(r[0]), dateISO: iso, category: String(r[2]), desc: String(r[3]), amount: Number(r[4]) || 0, paidVia: String(r[5] || 'cash')};
+  });
+}
+
 function getKitchen_(dateISO) {
   var sh = sheet_(SH_ORDERS, ORDER_COLS);
   // only the newest rows matter for the kitchen screen
@@ -143,6 +154,7 @@ function doGet(e) {
   try {
     if (p.action === 'getOrders') data = {orders: readOrders_(2)};
     else if (p.action === 'getKitchen') data = {kitchen: getKitchen_(p.d)};
+    else if (p.action === 'getExpenses') data = {expenses: readExpenses_()};
     else data = {ok: true, app: 'ridhi-pos', version: 3};
   } catch (err) {
     data = {ok: false, error: String(err)};
