@@ -124,7 +124,8 @@ function renderHist(){
       + '<div class="amt">' + fmt(o.total) + "</div></div>"
       + '<div class="items">' + o.items.map(i => '<span class="tag">' + esc(i.name) + " ×" + esc(i.qty) + "</span>").join("") + "</div>"
       + '<div class="row"><button class="btn ghost sm" data-id="' + esc(o.id) + '" onclick="viewOrder(this.dataset.id)">View / reprint</button>'
-      + (live ? '<button class="btn danger sm owner-only" data-id="' + esc(o.id) + '" onclick="openCancel(this.dataset.id)">Cancel bill</button>' : "") + "</div></div>";
+      + (live ? '<button class="btn ghost sm owner-only" data-id="' + esc(o.id) + '" onclick="openCancel(this.dataset.id)">Cancel bill</button>' : "")
+      + '<button class="btn danger sm owner-only" data-id="' + esc(o.id) + '" onclick="deleteBill(this.dataset.id)">🗑 Delete</button></div></div>';
   }).join("") + (more ? '<div class="muted small" style="text-align:center;padding:10px;">Showing the latest 200 bills — narrow the dates to see older ones</div>' : "")
     : '<div class="empty"><div>📋</div>No bills found</div>';
 }
@@ -140,36 +141,46 @@ function openCancel(id){
   $("cancelQuick").innerHTML = ["Wrong item billed","Customer left","Billed twice","Test bill"].map(r => '<button class="chip" onclick="document.getElementById(\'cancelReason\').value=this.textContent">' + r + "</button>").join("");
   openM("cancelMod");
 }
-function confirmCancel(){
+async function confirmCancel(){
   const o = findOrder(cancelId); if(!o) return closeM("cancelMod");
   const reason = $("cancelReason").value.trim();
   if(!reason){ toast("⚠️ Enter a reason"); return; }
-  o.status = "cancelled"; o.cancelReason = reason; o.cancelledAt = Date.now();
-  saveOrder(o);
-  const k = kitchen.find(x => String(x.id) === String(o.id)); if(k){ k.kitchenStatus = "done"; k.changedAt = Date.now(); saveKitchen(); }
-  queueSync({type:"cancel", id:o.id, reason});
+  const r = await sheetSave({type:"cancel", id:o.id, reason}, "Cancelling bill in the Sheet...", confirmCancel);
+  if(!r) return;
+  o.status = "cancelled"; o.cancelReason = reason; o.kitchenStatus = "done";
   rebuildIndex(); closeM("cancelMod"); renderHist(); renderCats();
   toast("❌ Bill #" + o.token + " cancelled");
 }
-
-// ── KITCHEN (this device + other devices through the Google Sheet) ──
-let kitchen = [], kitTimer = null, kitRemote = null; // kitRemote: null unknown, true syncing, false script too old
-function loadKitchen(){ const k = lsGet(LS.KIT, null); kitchen = k && k.date === isoToday() && Array.isArray(k.list) ? k.list : []; }
-function saveKitchen(){ lsSet(LS.KIT, {date:isoToday(), list:kitchen.slice(0, 60)}); }
-function kitchenAdd(o){
-  kitchen.unshift({id:o.id, token:o.token, time:o.time, customerName:o.customerName, orderType:o.orderType,
-    items:o.items.map(i => ({name:i.name, qty:i.qty, note:i.note || "", includes:i.includes || ""})), kitchenStatus:"preparing", changedAt:Date.now()});
-  saveKitchen();
+// Delete removes the bill from the Sheet completely. Its number becomes free:
+// if it was today's last bill, the next bill gets the same number.
+async function deleteBill(id, sure){
+  if(!needOwner()) return;
+  const o = findOrder(id); if(!o) return;
+  if(!sure && !confirm("Delete bill #" + o.token + " (" + fmt(o.total) + ") for ever?\n\nIt is removed from the Google Sheet and from all reports. This cannot be undone.")) return;
+  const r = await sheetSave({type:"orderDelete", id:o.id}, "Deleting bill from the Sheet...", () => deleteBill(id, true));
+  if(!r) return;
+  if(r.deleted !== true){ showNet("oldscript"); return; }
+  orders = orders.filter(x => String(x.id) !== String(o.id));
+  rebuildIndex(); renderHist(); renderCats();
+  toast("🗑️ Bill #" + o.token + " deleted · next bill number: " + nextToken(), 4500);
 }
-function setKS(id, s){
-  const k = kitchen.find(x => String(x.id) === String(id)); if(!k) return;
-  k.kitchenStatus = s; k.changedAt = Date.now(); saveKitchen();
+
+// ── KITCHEN (always straight from the Sheet, so every device shows the same orders) ──
+let kitTimer = null;
+function kitchenList(){
+  const t = isoToday();
+  return orders.filter(o => orderISO(o) === t && isLive(o) && (o.kitchenStatus || "preparing") !== "done");
+}
+async function setKS(id, s){
+  const o = findOrder(id); if(!o) return;
+  const before = o.kitchenStatus || "preparing";
+  o.kitchenStatus = s; renderKitchen();                 // show at once, then confirm with the Sheet
   if(s === "ready") playSound("ready");
-  queueSync({type:"kitchen", id:k.id, status:s});
-  renderKitchen();
+  const r = await sheetSave({type:"kitchen", id:o.id, status:s}, "", () => setKS(id, s), true);
+  if(!r){ o.kitchenStatus = before; renderKitchen(); }  // not saved → put it back
 }
 function renderKitchen(){
-  const list = kitchen.filter(k => k.kitchenStatus !== "done");
+  const list = kitchenList();
   $("kEmpty").classList.toggle("hide", list.length > 0);
   $("kGrid").innerHTML = list.map(o => '<div class="kc ' + (o.kitchenStatus === "ready" ? "rdy" : "") + '">'
     + '<div class="row" style="justify-content:space-between;margin-bottom:8px;"><span class="kt">#' + esc(o.token) + '</span><span><span class="tag">' + esc(typeLabel(o.orderType)) + '</span> <span class="muted small">' + esc(o.time) + "</span></span></div>"
@@ -180,41 +191,38 @@ function renderKitchen(){
                                    : '<button class="btn green sm" style="flex:1" data-id="' + esc(o.id) + '" onclick="setKS(this.dataset.id,\'ready\')">✓ Ready</button>')
     + '<button class="btn ghost sm" data-id="' + esc(o.id) + '" onclick="setKS(this.dataset.id,\'done\')">Served</button></div></div>').join("");
   const tag = $("kitLive");
-  if(sheetOn && S.kitchenSync && kitRemote !== false){ tag.className = "tag green"; tag.textContent = "● LIVE · all devices"; }
-  else { tag.className = "tag"; tag.textContent = kitRemote === false ? "● This device only — update Apps Script" : "● This device only"; }
+  if(sheetOn && sheetState !== "down"){ tag.className = "tag green"; tag.textContent = "● LIVE · from the Sheet"; }
+  else { tag.className = "tag red"; tag.textContent = sheetOn ? "● No connection" : "● Sheet not connected"; }
 }
 function kitchenOpen(){
   renderKitchen(); kitchenClose();
-  if(sheetOn && S.kitchenSync){ kitchenPoll(); kitTimer = setInterval(kitchenPoll, 8000); }
+  kitchenPoll(); kitTimer = setInterval(kitchenPoll, 8000);
 }
 function kitchenClose(){ if(kitTimer){ clearInterval(kitTimer); kitTimer = null; } }
 function kitchenRefresh(manual){
-  if(sheetOn && S.kitchenSync) kitchenPoll().then(() => { if(manual) toast("🔄 Kitchen refreshed"); });
-  else { renderKitchen(); if(manual) toast("This device only — connect the Sheet in Settings to share orders"); }
+  pullSheet().then(r => { renderKitchen(); if(manual) toast(r && r.ok ? "🔄 Kitchen refreshed" : "⚠️ Could not reach the Sheet"); });
 }
+// Light check every 8 seconds while the Kitchen screen is open: status changes and new orders.
 async function kitchenPoll(){
-  if(navigator.onLine === false) return;
+  if(!sheetOn || navigator.onLine === false) return;
+  const seq = writeSeq;
   let data;
   try{ data = await jsonp(sheetUrl, {action:"getKitchen", d:isoToday()}); }catch(e){ return; }
-  if(!data || !Array.isArray(data.kitchen)){ kitRemote = false; renderKitchen(); return; }
-  kitRemote = true;
-  let fresh = 0;
+  if(!data || !Array.isArray(data.kitchen) || seq !== writeSeq) return; // something was saved meanwhile → next round
+  let unknown = 0, changed = false;
   data.kitchen.forEach(r => {
     if(!r || r.id == null) return;
-    const st = r.status === "cancelled" ? "done" : (r.kitchenStatus || "preparing");
-    const k = kitchen.find(x => String(x.id) === String(r.id));
-    if(!k){
-      if(st === "done") return;
-      let items = r.items; if(typeof items === "string"){ try{ items = JSON.parse(items); }catch(e){ items = []; } }
-      kitchen.push({id:r.id, token:String(r.token || "").padStart(3, "0"), time:r.time || "", customerName:r.customerName || "", orderType:r.orderType || "dinein",
-        items:(items || []).map(i => ({name:i.name, qty:i.qty, note:i.note || "", includes:i.includes || ""})), kitchenStatus:st, changedAt:0});
-      fresh++;
-    } else if(Date.now() - (k.changedAt || 0) > 15000 && k.kitchenStatus !== st) k.kitchenStatus = st; // our own recent taps win
+    const o = findOrder(r.id);
+    if(!o){ if(r.status !== "cancelled" && r.kitchenStatus !== "done") unknown++; return; }
+    const st = r.kitchenStatus || "preparing";
+    if(o.kitchenStatus !== st){ o.kitchenStatus = st; changed = true; }
+    if(r.status === "cancelled" && isLive(o)){ o.status = "cancelled"; changed = true; }
   });
-  kitchen.sort((a,b) => num(b.id) - num(a.id));
-  saveKitchen();
-  if(fresh){ playSound("neworder"); toast("🔔 " + fresh + " new order" + (fresh > 1 ? "s" : "")); }
-  if(curView === "kitchen") renderKitchen();
+  if(unknown){
+    await pullSheet();
+    playSound("neworder"); toast("🔔 " + unknown + " new order" + (unknown > 1 ? "s" : ""));
+  }
+  if((changed || unknown) && curView === "kitchen") renderKitchen();
 }
 
 // ── EXPENSES ──
@@ -227,7 +235,7 @@ const EXP_CATS = [
   {id:"marketing", label:"Marketing", icon:"📢", color:"#f43f5e"},{id:"other", label:"Other", icon:"💼", color:"#9ca3af"}];
 const expCat = id => EXP_CATS.find(c => c.id === id) || {id:id || "other", label:String(id || "Other").replace(/_/g, " "), icon:"💼", color:"#9ca3af"};
 const expISO = e => e.dateISO || (e.dateISO = toISO(e.date));
-let expEditId = "", expCatSel = "", expPMSel = "cash";
+let expEditId = "", expNewId = "", expCatSel = "", expPMSel = "cash";
 function expToday(){ $("expFrom").value = $("expTo").value = isoToday(); renderExp(); }
 function expAll(){ $("expFrom").value = $("expTo").value = ""; renderExp(); }
 function renderExp(){
@@ -256,7 +264,7 @@ function selExpCat(id){ expCatSel = id; if(id) $("expCustom").value = ""; drawEx
 function openExp(id){
   if(!needOwner()) return;
   const e = id ? expenses.find(x => String(x.id) === String(id)) : null;
-  expEditId = e ? e.id : "";
+  expEditId = e ? e.id : ""; expNewId = "";
   $("expTitle").textContent = e ? "Edit expense" : "Add expense";
   $("expDesc").value = e ? (e.desc || "") : ""; $("expAmt").value = e ? e.amount : "";
   $("expDate").value = e ? expISO(e) : isoToday();
@@ -265,24 +273,29 @@ function openExp(id){
   expPMSel = e ? (e.paidVia || "cash") : "cash";
   drawExpForm(); openM("expMod");
 }
-function saveExp(){
+async function saveExp(){
   const desc = $("expDesc").value.trim(), amount = r2($("expAmt").value), dateISO = $("expDate").value, custom = $("expCustom").value.trim();
   const category = custom ? custom.toLowerCase().replace(/\s+/g, "_") : (expCatSel || "other");
   if(!desc){ toast("⚠️ Enter a description"); return; }
   if(!(amount > 0)){ toast("⚠️ Enter a valid amount"); return; }
   if(!dateISO){ toast("⚠️ Choose a date"); return; }
   const p = dateISO.split("-"), rec = {desc, amount, dateISO, date:+p[2] + "/" + +p[1] + "/" + p[0], category, paidVia:expPMSel};
-  let saved;
-  if(expEditId){ expenses = expenses.map(e => String(e.id) === String(expEditId) ? (saved = Object.assign({}, e, rec)) : e); }
-  else { saved = Object.assign({id:"e" + Date.now()}, rec); expenses.unshift(saved); }
-  lsSet(LS.EXP, expenses);
-  if(saved) queueSync(Object.assign({type:"expense"}, saved));
-  closeM("expMod"); renderExp(); toast(expEditId ? "✅ Expense updated" : "✅ Expense added");
+  if(!expEditId && !expNewId) expNewId = "e" + Date.now(); // keeps the same id if "Try again" is tapped
+  const old = expEditId ? expenses.find(e => String(e.id) === String(expEditId)) : null;
+  const saved = Object.assign({}, old || {id:expNewId}, rec);
+  const r = await sheetSave(Object.assign({type:"expense"}, saved), "Saving expense to the Sheet...", saveExp);
+  if(!r) return;
+  if(old) expenses = expenses.map(e => String(e.id) === String(saved.id) ? saved : e);
+  else expenses.unshift(saved);
+  expNewId = "";
+  closeM("expMod"); renderExp(); toast(old ? "✅ Expense updated" : "✅ Expense added");
 }
-function deleteExp(id){
-  if(!needOwner() || !confirm("Delete this expense?")) return;
-  expenses = expenses.filter(e => String(e.id) !== String(id)); lsSet(LS.EXP, expenses);
-  queueSync({type:"expenseDelete", id});
+async function deleteExp(id, sure){
+  if(!needOwner()) return;
+  if(!sure && !confirm("Delete this expense from the Sheet?")) return;
+  const r = await sheetSave({type:"expenseDelete", id}, "Deleting expense from the Sheet...", () => deleteExp(id, true));
+  if(!r) return;
+  expenses = expenses.filter(e => String(e.id) !== String(id));
   renderExp(); toast("🗑️ Expense deleted");
 }
 function csvExpenses(){
@@ -312,130 +325,154 @@ function openCustomer(ph){
   openM("custMod");
 }
 
-// ── GOOGLE SHEET SYNC (with retry queue) ──
-let queue = lsGet(LS.QUEUE, []), flushing = false;
-if(!Array.isArray(queue)) queue = [];
-function saveQueue(){ lsSet(LS.QUEUE, queue.slice(-500)); }
-function queueSync(body){
-  if(!sheetOn) return;
-  queue.push(body); saveQueue(); updateSyncUI(); flushQueue();
-}
-async function flushQueue(){
-  if(flushing || !sheetOn || !queue.length || navigator.onLine === false){ updateSyncUI(); return; }
-  flushing = true;
-  try{
-    while(queue.length){
-      // no-cors: the request reaches Apps Script; a network failure throws and the item stays queued
-      await fetch(sheetUrl, {method:"POST", mode:"no-cors", body:JSON.stringify(queue[0])});
-      queue.shift(); saveQueue();
-    }
-  }catch(e){}
-  flushing = false; updateSyncUI();
-}
+// ── GOOGLE SHEET: the only place bills and expenses are stored ──
+// Nothing is queued or kept on the device. A bill counts as saved only when the Sheet answers "ok".
+let sheetState = "idle";   // idle | ok | down
+let writeSeq = 0;          // goes up on every confirmed save, so an older read can never overwrite newer data
+let pulling = false, lastPull = null, dataSig = "";
 function updateSyncUI(){
   const p = $("syncPill"); if(!p) return;
-  if(!sheetOn){ p.className = "pill off owner-only"; p.textContent = "Sheet off"; }
-  else if(queue.length){ p.className = "pill warn owner-only"; p.textContent = "⏳ " + queue.length + " waiting"; }
-  else { p.className = "pill ok owner-only"; p.textContent = "Sheet ✓"; }
+  if(!sheetOn){ p.className = "pill off"; p.textContent = "Sheet off"; }
+  else if(navigator.onLine === false || sheetState === "down"){ p.className = "pill warn"; p.textContent = "⚠ No connection"; }
+  else if(sheetState === "ok"){ p.className = "pill ok"; p.textContent = "Sheet ✓"; }
+  else { p.className = "pill"; p.textContent = "Sheet…"; }
 }
 function jsonp(url, params){
   return new Promise((res, rej) => {
     const cb = "_rc_" + Date.now() + "_" + Math.floor(Math.random() * 1e6), sc = document.createElement("script");
     const done = () => { clearTimeout(t); try{ delete window[cb]; }catch(e){ window[cb] = undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
-    const t = setTimeout(() => { done(); rej(new Error("timeout")); }, 12000);
+    const t = setTimeout(() => { done(); rej(new Error("timeout")); }, 15000);
     window[cb] = d => { done(); res(d); };
     sc.onerror = () => { done(); rej(new Error("network")); };
     sc.src = url + (url.includes("?") ? "&" : "?") + Object.entries(Object.assign({callback:cb}, params)).map(([k, v]) => k + "=" + encodeURIComponent(v)).join("&");
     document.body.appendChild(sc);
   });
 }
+// Send one change to the Sheet and wait for its answer.
+async function sheetWrite(body){
+  if(!sheetOn) return {ok:false, reason:"nolink"};
+  if(navigator.onLine === false) return {ok:false, reason:"offline"};
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 25000);
+  try{
+    const r = await fetch(sheetUrl, {method:"POST", body:JSON.stringify(body), signal:ctl.signal});
+    const j = await r.json();
+    if(j && j.ok){ writeSeq++; sheetState = "ok"; updateSyncUI(); return Object.assign({}, j, {ok:true}); }
+    return {ok:false, reason:"script", error:String((j && j.error) || "")};
+  }catch(e){ sheetState = "down"; updateSyncUI(); return {ok:false, reason:"network"}; }
+  finally{ clearTimeout(t); }
+}
+// sheetWrite + "Saving..." screen + the "not connected" pop-up. Returns the Sheet's answer, or null if not saved.
+async function sheetSave(body, msg, retry, quiet){
+  if(!quiet) busy(true, msg || "Saving to the Sheet...");
+  const r = await sheetWrite(body);
+  if(!quiet) busy(false);
+  if(r.ok) return r;
+  showNet(r.reason, retry, r.error);
+  return null;
+}
+// ── "Not connected" pop-up ──
+let netRetry = null;
+function showNet(reason, retry, detail){
+  netRetry = retry || null;
+  const again = netRetry ? '<button class="btn primary" onclick="netAgain()">🔄 Try again</button>' : "";
+  let title, msg, btns;
+  if(reason === "nolink"){
+    title = "🔌 Google Sheet not connected";
+    msg = "Bills are saved only in the Google Sheet, so this cannot be saved until the Sheet is connected.<br><br><b>Nothing is lost</b> — everything is still on the screen.";
+    btns = '<button class="btn primary" onclick="netConnect()">🔗 Connect now</button><button class="btn ghost" onclick="closeM(\'netMod\')">Close</button>';
+  } else if(reason === "oldscript"){
+    title = "⚠️ Update the Apps Script";
+    msg = "Deleting a bill needs the new script. In Google Sheets open Extensions → Apps Script, paste the new <b>RidhiChats_AppScript.gs</b>, then Deploy → Manage deployments → pencil → New version → Deploy.<br><br>The bill was <b>not</b> deleted.";
+    btns = '<button class="btn ghost" onclick="closeM(\'netMod\')">OK</button>';
+  } else if(reason === "script"){
+    title = "⚠️ The Sheet did not accept it";
+    msg = "The Google Sheet answered with an error, so this was <b>not saved</b>.<br><span class=\"muted small\">" + esc(detail || "") + "</span>";
+    btns = again + '<button class="btn ghost" onclick="closeM(\'netMod\')">Close</button>';
+  } else {
+    title = "📡 No connection to the Sheet";
+    msg = "This was <b>NOT saved</b> — the Google Sheet could not be reached. Check the internet (Wi-Fi / mobile data), then tap <b>Try again</b>.<br><br><b>Nothing is lost</b> — everything is still on the screen.";
+    btns = again + '<button class="btn ghost" onclick="closeM(\'netMod\')">Close</button>';
+  }
+  $("netTitle").textContent = title; $("netMsg").innerHTML = msg; $("netBtns").innerHTML = btns;
+  openM("netMod"); playSound("error");
+}
+function netAgain(){ const f = netRetry; netRetry = null; closeM("netMod"); if(f) f(); }
+function netConnect(){
+  const f = netRetry; netRetry = null; closeM("netMod");
+  sheetUrl = DEFAULT_SHEET_URL; sheetOn = true; localStorage.removeItem(LS.U); sheetState = "idle"; // back to the built-in link
+  updateSyncUI(); pullSheet();
+  if(f) f();
+}
 async function connectSheet(){
   const url = $("setUrl").value.trim();
   if(!/^https:\/\/script\.google\.com\/.+\/exec/.test(url)){ toast("⚠️ Paste the Web App URL ending in /exec"); return; }
-  busy(true, "Testing the Sheet link...");
-  try{
-    await fetch(url, {method:"GET", mode:"no-cors"});
-    sheetUrl = url; sheetOn = true; localStorage.setItem(LS.U, url); kitRemote = null;
-  }catch(e){ busy(false); toast("❌ Could not reach that link — check internet and the deployment"); return; }
-  busy(false); updateSyncUI(); flushQueue();
-  await fetchSheet(); // bring the Sheet's bills and expenses onto this device straight away
+  sheetUrl = url; sheetOn = true; localStorage.setItem(LS.U, url); sheetState = "idle";
+  updateSyncUI();
+  await fetchSheet(); // load this Sheet's bills and expenses straight away
   reSettings();
 }
 function useDefaultSheet(){
-  sheetUrl = DEFAULT_SHEET_URL; sheetOn = true; localStorage.removeItem(LS.U); kitRemote = null; // no saved link = built-in link
-  updateSyncUI(); flushQueue(); reSettings(); fetchSheet();
+  sheetUrl = DEFAULT_SHEET_URL; sheetOn = true; localStorage.removeItem(LS.U); sheetState = "idle"; // no saved link = built-in link
+  updateSyncUI(); reSettings(); fetchSheet();
 }
 function disconnectSheet(){
-  if(!confirm("Disconnect the Google Sheet? Bills stay on this device.")) return;
-  sheetUrl = ""; sheetOn = false; localStorage.setItem(LS.U, ""); queue = []; saveQueue(); // "" = stay off, do not fall back to the built-in link
+  if(!confirm("Disconnect the Google Sheet?\n\nBilling stops until it is connected again — bills are saved only in the Sheet.")) return;
+  sheetUrl = ""; sheetOn = false; localStorage.setItem(LS.U, ""); // "" = stay off, do not fall back to the built-in link
+  orders = []; expenses = []; dataSig = ""; rebuildIndex();
   updateSyncUI(); renderSettings(); toast("🔌 Sheet disconnected");
 }
-// Upload every bill and expense on this device (used once after installing the new Apps Script).
-function pushAllToSheet(){
-  if(!sheetOn || !confirm("Send all " + orders.length + " bills and " + expenses.length + " expenses on this device to the Sheet?")) return;
-  const items = orders.map(o => Object.assign({type:"order", kitchenStatus:"done"}, o)).concat(expenses.map(e => Object.assign({type:"expense"}, e)));
-  for(let i = 0; i < items.length; i += 40) queue.push({type:"batch", items:items.slice(i, i + 40)});
-  saveQueue(); updateSyncUI(); flushQueue(); reSettings();
-  toast("⬆️ Uploading " + items.length + " records in the background");
-}
-// Download bills (and expenses) from the Sheet and merge them into this device.
-// Runs by itself after connecting, when the app opens and every 2 minutes; "Fetch" runs it at once.
-let pulling = false, lastPull = null;
+// Load ALL bills and expenses from the Sheet into memory (replacing what was shown).
+// Runs when the app opens, every minute, after connecting, and when "Refresh" is tapped.
 async function pullSheet(){
-  if(!sheetOn || pulling || navigator.onLine === false) return null;
+  if(!sheetOn){ updateSyncUI(); return null; }
+  if(pulling) return null;
   pulling = true;
-  const res = {ok:false, bills:0, newBills:0, newExp:0, expSupported:false};
+  const res = {ok:false, bills:0, exp:0, expSupported:false};
   try{
-    const data = await jsonp(sheetUrl, {action:"getOrders"});
-    if(!data || !Array.isArray(data.orders)) return res;
-    res.ok = true; res.bills = data.orders.length;
-    const changed = [];
-    data.orders.forEach(r => {
-      if(!r || r.id == null) return;
-      const ex = findOrder(r.id);
-      if(!ex){ const o = normOrder(r); delete o.kitchenStatus; orders.push(o); changed.push(o); res.newBills++; }
-      else if(r.status === "cancelled" && isLive(ex)){ ex.status = "cancelled"; ex.cancelReason = r.cancelReason || ""; changed.push(ex); }
-    });
-    try{
-      const e = await jsonp(sheetUrl, {action:"getExpenses"});
-      if(e && Array.isArray(e.expenses)){
-        res.expSupported = true;
-        e.expenses.forEach(x => {
-          if(!x || x.id == null || x.id === "" || expenses.some(y => String(y.id) === String(x.id))) return;
-          const iso = toISO(x.dateISO), p = iso.split("-");
-          expenses.push({id:String(x.id), desc:String(x.desc || ""), amount:r2(x.amount), dateISO:iso, date:p.length === 3 ? +p[2] + "/" + +p[1] + "/" + p[0] : "",
-            category:String(x.category || "other"), paidVia:String(x.paidVia || "cash")});
-          res.newExp++;
-        });
-        if(res.newExp){ expenses.sort((a,b) => expISO(b) > expISO(a) ? 1 : -1); lsSet(LS.EXP, expenses); }
-      }
-    }catch(err){}
-    if(changed.length){
+    for(let attempt = 0; attempt < 3; attempt++){
+      const seq = writeSeq;
+      const data = await jsonp(sheetUrl, {action:"getOrders"});
+      if(!data || !Array.isArray(data.orders)) throw new Error("bad answer");
+      let exp = null;
+      try{ const e = await jsonp(sheetUrl, {action:"getExpenses"}); if(e && Array.isArray(e.expenses)) exp = e.expenses; }catch(err){}
+      if(seq !== writeSeq) continue; // a bill was saved while we were reading → read again
+      orders = data.orders.filter(r => r && r.id != null).map(normOrder);
       sortOrders();
-      if(DB.ok) await DB.bulk("orders", changed).catch(() => toast("⚠️ Could not save bills"));
-      else lsSet(LS.O, orders);
+      if(exp){
+        expenses = exp.filter(x => x && x.id != null && x.id !== "").map(x => {
+          const iso = toISO(x.dateISO), p = iso.split("-");
+          return {id:String(x.id), desc:String(x.desc || ""), amount:r2(x.amount), dateISO:iso, date:p.length === 3 ? +p[2] + "/" + +p[1] + "/" + p[0] : "",
+            category:String(x.category || "other"), paidVia:String(x.paidVia || "cash")};
+        }).sort((a,b) => a.dateISO < b.dateISO ? 1 : a.dateISO > b.dateISO ? -1 : (String(b.id) > String(a.id) ? 1 : -1));
+        res.expSupported = true;
+      }
       rebuildIndex();
+      res.ok = true; res.bills = orders.length; res.exp = expenses.length;
+      sheetState = "ok"; lastPull = new Date();
+      const sig = orders.map(o => o.id + ":" + o.status + ":" + o.kitchenStatus + ":" + o.token).join("|") + "#" + expenses.map(e => e.id + ":" + e.amount).join("|");
+      if(sig !== dataSig){ dataSig = sig; refreshView(); }
+      break;
     }
-    lastPull = new Date();
-    if(changed.length || res.newExp){
-      if(curView === "dashboard") renderDash();
-      if(curView === "history") renderHist();
-      if(curView === "expenses") renderExp();
-      if(curView === "customers") renderCustomers();
-      if(curView === "pos") renderCats();
-    }
-    return res;
-  }catch(e){ return res; }
-  finally{ pulling = false; }
+  }catch(e){ sheetState = "down"; }
+  finally{ pulling = false; updateSyncUI(); }
+  return res;
+}
+function refreshView(){
+  if(curView === "dashboard") renderDash();
+  if(curView === "history") renderHist();
+  if(curView === "expenses") renderExp();
+  if(curView === "customers") renderCustomers();
+  if(curView === "kitchen") renderKitchen();
+  if(curView === "pos") renderCats();
 }
 async function fetchSheet(){
-  if(!sheetOn){ toast("⚠️ Connect the Sheet first"); return; }
-  busy(true, "Getting bills from Google Sheets...");
-  const r = await pullSheet();
+  if(!sheetOn){ showNet("nolink"); return; }
+  busy(true, "Loading from Google Sheets...");
+  let r = await pullSheet();
+  if(!r){ await new Promise(x => setTimeout(x, 1500)); r = await pullSheet(); }
   busy(false);
-  if(!r) toast("⏳ Already updating — try again in a moment");
-  else if(!r.ok) toast("⚠️ Could not reach the Sheet — check internet and the Web App link");
-  else toast("✅ Sheet: " + r.bills + " bills · " + r.newBills + " new" + (r.expSupported ? " · " + r.newExp + " new expenses" : " · update Apps Script to get expenses too"), 5000);
+  if(!r || !r.ok) showNet("network", fetchSheet);
+  else toast("✅ Sheet: " + r.bills + " bills · " + r.exp + " expenses", 4000);
   if(curView === "settings") reSettings();
 }
 
@@ -470,12 +507,11 @@ function renderSettings(){
       + '<div class="field"><div class="lbl">Apps Script Web App URL</div><textarea class="inp" id="setUrl" rows="2" placeholder="https://script.google.com/macros/s/.../exec" style="font-family:monospace;font-size:12px;">' + esc(sheetUrl) + "</textarea></div>"
       + '<div class="row" style="margin-bottom:8px;"><button class="btn primary sm" onclick="connectSheet()">' + (sheetOn ? "Update link" : "Connect") + "</button>"
       + (sheetUrl !== DEFAULT_SHEET_URL ? '<button class="btn ghost sm" onclick="useDefaultSheet()">Use built-in link</button>' : "")
-      + (sheetOn ? '<button class="btn ghost sm" onclick="fetchSheet()">Fetch bills from Sheet</button><button class="btn ghost sm" onclick="pushAllToSheet()">Send all bills to Sheet</button><button class="btn danger sm" onclick="disconnectSheet()">Disconnect</button>' : "") + "</div>"
-      + (sheetOn ? sw("Share Kitchen orders between devices", "Counter phone and kitchen tablet show the same live orders", "kitchenSync") : "")
-      + '<div class="muted small">' + (queue.length ? "⏳ " + queue.length + " item(s) waiting to upload — they go automatically when the internet is back. " : "") + 'Two-device kitchen sync and cancel sync need the new script in <b>RidhiChats_AppScript.gs</b> (see the user manual).</div></div>'
-    + '<div class="card" style="margin-bottom:12px;"><h3>💾 Backup</h3><div class="muted small" style="margin-bottom:10px;">Everything is stored on this device. Download a backup file regularly and keep it in Google Drive or WhatsApp it to yourself.</div>'
+      + (sheetOn ? '<button class="btn ghost sm" onclick="fetchSheet()">🔄 Refresh from Sheet</button><button class="btn danger sm" onclick="disconnectSheet()">Disconnect</button>' : "") + "</div>"
+      + '<div class="muted small">Bills and expenses are stored <b>only in this Google Sheet</b> — nothing is kept on the phone. Every bill is saved to the Sheet before it prints, so billing needs internet.' + (lastPull ? " Last loaded " + lastPull.toLocaleTimeString("en-IN", {hour:"2-digit", minute:"2-digit"}) + "." : "") + ' Deleting a bill needs the latest <b>RidhiChats_AppScript.gs</b>.</div></div>'
+    + '<div class="card" style="margin-bottom:12px;"><h3>💾 Backup of this device setup</h3><div class="muted small" style="margin-bottom:10px;">Saves the menu changes, your photos and these settings (not bills — those are in the Sheet). Use it to set up a new phone quickly.</div>'
       + '<div class="row"><button class="btn green sm" onclick="backupNow()">⬇️ Download backup</button><button class="btn ghost sm" onclick="document.getElementById(\'restoreFile\').click()">⬆️ Restore from backup</button><input type="file" id="restoreFile" accept=".json,application/json" class="hide" onchange="restoreBackup(this)"/></div></div>'
-    + '<div class="card"><h3>ℹ️ About</h3><div class="muted small">Ridhi Chats POS v' + APP_VERSION + " · " + orders.length + " bills · " + expenses.length + " expenses · " + Object.keys(IMGS).length + " own photos · storage: " + (DB.ok ? "device database" : "browser storage") + "</div></div>";
+    + '<div class="card"><h3>ℹ️ About</h3><div class="muted small">Ridhi Chats POS v' + APP_VERSION + " · " + orders.length + " bills and " + expenses.length + " expenses in the Sheet · " + Object.keys(IMGS).length + " own photos</div></div>";
 }
 // Read the typed fields into S (kept in memory until "Save changes" is tapped)
 function stashSet(){
@@ -515,10 +551,10 @@ async function testPrint(){
 // ── BACKUP / RESTORE ──
 function backupNow(){
   const ls = {};
-  for(let i = 0; i < localStorage.length; i++){ const k = localStorage.key(i); if(k && k.startsWith("rc_") && k !== LS.O) ls[k] = localStorage.getItem(k); }
-  const data = {app:"ridhi-chats-pos", version:APP_VERSION, exportedAt:new Date().toISOString(), ls, orders, images:IMGS};
-  download("ridhi_pos_backup_" + isoToday() + ".json", JSON.stringify(data), "application/json");
-  toast("✅ Backup downloaded — keep it somewhere safe");
+  for(let i = 0; i < localStorage.length; i++){ const k = localStorage.key(i); if(k && k.startsWith("rc_")) ls[k] = localStorage.getItem(k); }
+  const data = {app:"ridhi-chats-pos", version:APP_VERSION, exportedAt:new Date().toISOString(), ls, images:IMGS};
+  download("ridhi_pos_setup_" + isoToday() + ".json", JSON.stringify(data), "application/json");
+  toast("✅ Setup backup downloaded (menu, photos, settings)");
 }
 function restoreBackup(input){
   const f = input.files && input.files[0]; input.value = "";
@@ -527,19 +563,17 @@ function restoreBackup(input){
   rd.onload = async () => {
     let d;
     try{ d = JSON.parse(rd.result); }catch(e){ toast("❌ That file is not a valid backup"); return; }
-    if(!d || d.app !== "ridhi-chats-pos" || !Array.isArray(d.orders)){ toast("❌ That file is not a Ridhi Chats POS backup"); return; }
-    if(!confirm("Restore backup from " + String(d.exportedAt || "").slice(0, 10) + " with " + d.orders.length + " bills?\n\nThis REPLACES everything on this device.")) return;
+    if(!d || d.app !== "ridhi-chats-pos" || !d.ls){ toast("❌ That file is not a Ridhi Chats POS backup"); return; }
+    if(!confirm("Restore the setup backup from " + String(d.exportedAt || "").slice(0, 10) + "?\n\nThis replaces the menu changes, photos and settings on this device. Bills are not affected — they live in the Sheet.")) return;
     busy(true, "Restoring...");
     try{
       Object.keys(localStorage).filter(k => k.startsWith("rc_")).forEach(k => localStorage.removeItem(k));
       Object.entries(d.ls || {}).forEach(([k, v]) => { if(k.startsWith("rc_")) localStorage.setItem(k, v); });
-      localStorage.setItem(LS.RESET, DATA_RESET_ID); // a restored backup is kept, not wiped by the one-time clean start
-      const os = d.orders.map(normOrder);
+      localStorage.setItem(LS.RESET, DATA_RESET_ID);
       if(DB.ok){
-        await DB.clear("orders"); await DB.bulk("orders", os);
         await DB.clear("images");
         for(const [k, v] of Object.entries(d.images || {})) await DB.put("images", v, k);
-      } else localStorage.setItem(LS.O, JSON.stringify(os));
+      }
       location.reload();
     }catch(e){ busy(false); toast("❌ Restore failed: " + (e && e.message || e)); }
   };

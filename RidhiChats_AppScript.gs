@@ -1,5 +1,8 @@
 /**
- * Ridhi Chats POS v3 — Google Sheets backend
+ * Ridhi Chats POS — Google Sheets backend (script version 4)
+ *
+ * The Sheet is the ONLY place bills and expenses are stored. The app saves a bill here first
+ * and only then prints it; deleting a bill here frees its number.
  *
  * SETUP (one time, about 3 minutes)
  *  1. Open your Google Sheet  →  Extensions  →  Apps Script
@@ -42,8 +45,34 @@ function findRow_(sh, id) {
 
 function col_(cols, name) { return cols.indexOf(name) + 1; }
 
+function iso_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+  return String(v);
+}
+
+function pad3_(n) { n = String(n); while (n.length < 3) n = '0' + n; return n; }
+
+// Bill number for a NEW bill = highest number used today + 1.
+// Deleted bills are gone from the sheet, so their number is free again
+// (delete bill 006 when it is the last one, and the next bill is 006).
+function nextToken_(sh, dateISO) {
+  var last = sh.getLastRow(), max = 0;
+  if (last >= 2) {
+    var start = Math.max(2, last - 499);
+    sh.getRange(start, 1, last - start + 1, 4).getValues().forEach(function (r) {
+      if (iso_(r[1]) !== dateISO) return;
+      var n = parseInt(r[3], 10);
+      if (n > max) max = n;
+    });
+  }
+  return pad3_(max + 1);
+}
+
 function upsertOrder_(d) {
   var sh = sheet_(SH_ORDERS, ORDER_COLS);
+  var r = findRow_(sh, d.id);
+  // the sheet decides the bill number, so two phones can never give out the same one
+  d.token = r ? pad3_(sh.getRange(r, col_(ORDER_COLS, 'token')).getValue() || d.token || 0) : nextToken_(sh, d.dateISO || '');
   var items = d.items || [];
   var text = items.map(function (i) { return i.name + ' x' + i.qty + (i.note ? ' (' + i.note + ')' : ''); }).join('; ');
   var copy = {};
@@ -52,7 +81,6 @@ function upsertOrder_(d) {
              d.orderType || 'dinein', d.customerName || '', String(d.customerPhone || ''), text,
              String(d.subtotal || 0), String(d.discount || 0), String(d.gst || 0), String(d.total || 0), d.paymentMethod || 'cash',
              d.cancelReason || '', JSON.stringify(copy)];
-  var r = findRow_(sh, d.id);
   if (r) {
     // keep the kitchen status already in the sheet (the kitchen may have changed it)
     row[col_(ORDER_COLS, 'kitchenStatus') - 1] = sh.getRange(r, col_(ORDER_COLS, 'kitchenStatus')).getValue() || row[5];
@@ -60,13 +88,22 @@ function upsertOrder_(d) {
   } else {
     sh.appendRow(row);
   }
+  return {id: d.id, token: d.token};
 }
 
 function setOrderCols_(id, values) {
   var sh = sheet_(SH_ORDERS, ORDER_COLS);
   var r = findRow_(sh, id);
-  if (!r) return;
+  if (!r) return {found: false};
   for (var name in values) sh.getRange(r, col_(ORDER_COLS, name)).setValue(values[name]);
+  return {found: true};
+}
+
+function deleteOrder_(id) {
+  var sh = sheet_(SH_ORDERS, ORDER_COLS);
+  var r = findRow_(sh, id);
+  if (r) sh.deleteRow(r);
+  return {deleted: true, found: !!r};
 }
 
 function upsertExpense_(d) {
@@ -75,22 +112,26 @@ function upsertExpense_(d) {
   var r = findRow_(sh, d.id);
   if (r) sh.getRange(r, 1, 1, row.length).setValues([row]);
   else sh.appendRow(row);
+  return {id: d.id};
 }
 
 function deleteExpense_(id) {
   var sh = sheet_(SH_EXP, EXP_COLS);
   var r = findRow_(sh, id);
   if (r) sh.deleteRow(r);
+  return {deleted: true, found: !!r};
 }
 
 function handle_(d) {
-  if (!d || !d.type) return;
-  if (d.type === 'order') upsertOrder_(d);
-  else if (d.type === 'kitchen') setOrderCols_(d.id, {kitchenStatus: d.status || 'preparing'});
-  else if (d.type === 'cancel') setOrderCols_(d.id, {status: 'cancelled', cancelReason: d.reason || '', kitchenStatus: 'done'});
-  else if (d.type === 'expense') upsertExpense_(d);
-  else if (d.type === 'expenseDelete') deleteExpense_(d.id);
-  else if (d.type === 'batch') (d.items || []).forEach(handle_);
+  if (!d || !d.type) return {};
+  if (d.type === 'order') return upsertOrder_(d);
+  if (d.type === 'kitchen') return setOrderCols_(d.id, {kitchenStatus: d.status || 'preparing'});
+  if (d.type === 'cancel') return setOrderCols_(d.id, {status: 'cancelled', cancelReason: d.reason || '', kitchenStatus: 'done'});
+  if (d.type === 'orderDelete') return deleteOrder_(d.id);
+  if (d.type === 'expense') return upsertExpense_(d);
+  if (d.type === 'expenseDelete') return deleteExpense_(d.id);
+  if (d.type === 'batch') { (d.items || []).forEach(handle_); return {}; }
+  return {};
 }
 
 function readOrders_(fromRow) {
@@ -139,8 +180,10 @@ function doPost(e) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    handle_(JSON.parse(e.postData.contents));
-    return ContentService.createTextOutput(JSON.stringify({ok: true})).setMimeType(ContentService.MimeType.JSON);
+    var res = handle_(JSON.parse(e.postData.contents)) || {};
+    res.ok = true;
+    res.v = 4;
+    return ContentService.createTextOutput(JSON.stringify(res)).setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify({ok: false, error: String(err)})).setMimeType(ContentService.MimeType.JSON);
   } finally {
@@ -155,7 +198,7 @@ function doGet(e) {
     if (p.action === 'getOrders') data = {orders: readOrders_(2)};
     else if (p.action === 'getKitchen') data = {kitchen: getKitchen_(p.d)};
     else if (p.action === 'getExpenses') data = {expenses: readExpenses_()};
-    else data = {ok: true, app: 'ridhi-pos', version: 3};
+    else data = {ok: true, app: 'ridhi-pos', version: 4};
   } catch (err) {
     data = {ok: false, error: String(err)};
   }

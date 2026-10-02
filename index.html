@@ -43,7 +43,7 @@
   <nav class="nav-top" id="navTop"></nav>
   <div class="top-right">
     <span class="pill" id="clock"></span>
-    <button class="pill off owner-only" id="syncPill" onclick="sv('settings')">Sheet off</button>
+    <button class="pill" id="syncPill" onclick="fetchSheet()" title="Tap to refresh from the Sheet">Sheet…</button>
     <span class="pill" id="rolePill">Staff</span>
     <button class="icon-btn" title="Lock" onclick="lockApp()">&#128274;</button>
   </div>
@@ -303,6 +303,13 @@
 <div class="ov" id="moreMod"><div class="modal">
   <div class="m-head"><b>More</b><button class="m-x" onclick="closeM('moreMod')">&times;</button></div>
   <div class="more-grid" id="moreGrid"></div>
+</div></div>
+
+<!-- NOT CONNECTED -->
+<div class="ov" id="netMod" style="z-index:250;"><div class="modal" style="max-width:420px;">
+  <div class="m-head"><b id="netTitle">Not connected</b><button class="m-x" onclick="closeM('netMod')">&times;</button></div>
+  <p id="netMsg" style="margin-bottom:16px;line-height:1.55;"></p>
+  <div class="m-actions" id="netBtns"></div>
 </div></div>
 
 <!-- INSTALL / UPDATE BANNERS -->

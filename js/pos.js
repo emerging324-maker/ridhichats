@@ -271,23 +271,30 @@ function renderUPI(){
 }
 
 // ── PLACE ORDER ──
-let placing = false;
+// The bill is saved to the Google Sheet FIRST. Only when the Sheet confirms it does the bill exist:
+// then the cart is cleared and the receipt opens. If the Sheet cannot be reached, a pop-up asks to
+// connect / try again and the order stays on screen — nothing is kept on the device instead.
+let placing = false, pendingBill = null; // pendingBill: keeps the same bill id when "Try again" is tapped
 async function placeOrder(){
   if(!cart.length || placing) return;
   const tot = getTotal(), given = num($("cashIn").value);
   if(pm === "cash" && given && given < tot){ toast("⚠️ Cash received is less than the bill"); playSound("error"); return; }
   placing = true;
   try{
-    const now = Date.now();
-    const order = {id:now, ts:now, token:nxtTok(), date:today(), dateISO:isoToday(), time:nowT(),
-      customerName:(cust.name || "").trim(), customerPhone:cust.phone.length === 10 ? cust.phone : "", orderType,
-      items:cart.map(l => ({id:l.id, name:l.name, price:l.price, qty:l.qty, icon:l.icon, note:l.note || "", includes:l.includes || ""})),
+    const items = cart.map(l => ({id:l.id, name:l.name, price:l.price, qty:l.qty, icon:l.icon, note:l.note || "", includes:l.includes || ""}));
+    const sig = JSON.stringify([items, tot, pm, orderType, cust.phone, cust.name]);
+    if(!pendingBill || pendingBill.sig !== sig) pendingBill = {sig, id:Date.now()};
+    const order = {id:pendingBill.id, ts:pendingBill.id, token:nextToken(), date:today(), dateISO:isoToday(), time:nowT(),
+      customerName:(cust.name || "").trim(), customerPhone:cust.phone.length === 10 ? cust.phone : "", orderType, items,
       subtotal:r2(getSub()), discount:r2(getDA()), gst:getGST(), total:tot, paymentMethod:pm,
       cashGiven:pm === "cash" && given ? given : 0, change:pm === "cash" && given ? r2(given - tot) : 0,
-      loyalty:loyaltyFor(cust.phone), status:"paid", by:role || ""};
-    orders.unshift(order); saveOrder(order);
-    kitchenAdd(order);
-    queueSync(Object.assign({type:"order"}, order, {kitchenStatus:"preparing"}));
+      loyalty:loyaltyFor(cust.phone), status:"paid", by:role || "", kitchenStatus:"preparing"};
+    const res = await sheetSave(Object.assign({type:"order"}, order), "Saving bill to the Sheet...", placeOrder);
+    if(!res) return;                                   // not saved → pop-up is showing, order still on screen
+    if(res.token) order.token = String(res.token).padStart(3, "0"); // the Sheet gives the final bill number
+    pendingBill = null;
+    orders = orders.filter(o => String(o.id) !== String(order.id));
+    orders.unshift(order); sortOrders();
     rebuildIndex();
     closeM("payMod"); toggleOrder(false);
     resetOrderState(); renderCats(); renderMenu(); renderCart();

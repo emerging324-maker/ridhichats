@@ -2,7 +2,7 @@
 // ══════════════════════════════════════════════════════
 //  Ridhi Chats POS v3 — core: data, storage, settings, login, navigation
 // ══════════════════════════════════════════════════════
-const APP_VERSION = "3.0";
+const APP_VERSION = "3.1";
 
 // ── MENU (built-in) ──
 const BASE_MENU = {
@@ -161,7 +161,7 @@ const DB = {
 
 // ── SETTINGS ──
 const S_DEF = {shopName:"Ridhi Chats", tagline:"Pure Jain Veg", address:"Katpadi, Vellore", phone:"", gstin:"", footer:"Thank you! Please visit again",
-  upiId:"", upiName:"Ridhi Chats", autoPrint:false, autoKOT:false, printRoute:"bt", loyaltyN:0, loyaltyReward:"", ownerHash:"", staffHash:"", kitchenSync:true, openingCash:0};
+  upiId:"", upiName:"Ridhi Chats", autoPrint:false, autoKOT:false, printRoute:"bt", loyaltyN:0, loyaltyReward:"", ownerHash:"", staffHash:"", openingCash:0};
 let S = Object.assign({}, S_DEF);
 function loadSettings(){ S = Object.assign({}, S_DEF, lsGet(LS.SET, {})); }
 function saveSettings(){ lsSet(LS.SET, S); }
@@ -179,22 +179,21 @@ let activeCat = "Samosa", menuMode = "", role = null;
 let curReceipt = null, sheetUrl = "", sheetOn = false;
 let customers = new Map(), favIds = [];
 
-// ── ONE-TIME CLEAN START (3 Oct 2026) ──
-// The first time a device opens this version it deletes the old bills, expenses, held bills,
-// kitchen list, upload queue and token number, and moves to the built-in (new) Sheet link.
-// Menu, prices, photos, settings, logins and the printer are kept. It never runs twice on a device.
-// To do another clean start in future, change DATA_RESET_ID.
+// ── NOTHING ABOUT BILLS IS KEPT ON THE DEVICE ──
+// The Google Sheet is the only store for bills and expenses. Every time the app opens it removes
+// any bill data an older version left on this device (bills, expenses, kitchen list, upload queue,
+// token counter). Menu, prices, photos, settings, logins, the Sheet link and the printer stay.
 const DATA_RESET_ID = "2026-10-03";
-async function oneTimeReset(){
-  if(localStorage.getItem(LS.RESET) === DATA_RESET_ID) return;
-  try{
-    if(DB.ok) await DB.clear("orders");
-    [LS.O, LS.EXP, LS.HELD, LS.KIT, LS.QUEUE, LS.T, LS.TD, LS.U].forEach(k => localStorage.removeItem(k));
+async function purgeLocalData(){
+  try{ if(DB.ok) await DB.clear("orders"); }catch(e){}
+  [LS.O, LS.EXP, LS.KIT, LS.QUEUE, LS.T, LS.TD].forEach(k => localStorage.removeItem(k));
+  if(localStorage.getItem(LS.RESET) !== DATA_RESET_ID){   // one time: also drop an old Sheet link and old held bills
+    [LS.HELD, LS.U].forEach(k => localStorage.removeItem(k));
     localStorage.setItem(LS.RESET, DATA_RESET_ID);
-  }catch(e){} // not marked done, so it tries again next time the app opens
+  }
 }
 
-// ── ORDERS: load / save ──
+// ── ORDERS (in memory only — loaded from the Sheet) ──
 function normOrder(o){
   o.id = isFinite(+o.id) && String(o.id).trim() !== "" ? +o.id : String(o.id);
   if(typeof o.items === "string"){ try{ o.items = JSON.parse(o.items); }catch(e){ o.items = []; } }
@@ -206,27 +205,6 @@ function normOrder(o){
   return o;
 }
 function sortOrders(){ orders.sort((a,b) => (orderTs(b) - orderTs(a)) || (String(b.id) > String(a.id) ? 1 : -1)); }
-async function loadOrders(){
-  const old = lsGet(LS.O, []);
-  let arr = [];
-  if(DB.ok){
-    try{ arr = await DB.all("orders"); }catch(e){ arr = []; }
-    // carry over bills saved by the old version (and never lose any that are only in localStorage)
-    const have = new Set(arr.map(o => String(o.id)));
-    const extra = (Array.isArray(old) ? old : []).filter(o => o && o.id != null && !have.has(String(o.id))).map(normOrder);
-    if(extra.length){ try{ await DB.bulk("orders", extra); }catch(e){} arr = arr.concat(extra); }
-  } else arr = Array.isArray(old) ? old : [];
-  orders = arr.map(normOrder);
-  sortOrders();
-}
-function saveOrder(o){
-  if(DB.ok) DB.put("orders", o).catch(() => toast("⚠️ Could not save bill — storage problem"));
-  else lsSet(LS.O, orders);
-}
-function saveAllOrders(){
-  if(DB.ok) return DB.bulk("orders", orders).catch(() => toast("⚠️ Could not save bills"));
-  lsSet(LS.O, orders);
-}
 
 // ── MENU BUILD ──
 function loadMenuStores(){
@@ -279,13 +257,14 @@ function thumbHTML(item){
              : '<span class="emo" style="background:linear-gradient(135deg,' + esc(item.color || "#f59e0b") + '33,transparent)">' + esc(item.icon || "🍽️") + '</span>';
 }
 
-// ── TOKENS (restart from 001 every day) ──
-function nxtTok(){
-  let n = parseInt(localStorage.getItem(LS.T) || "0") || 0;
-  if(localStorage.getItem(LS.TD) !== isoToday()){ n = 0; localStorage.setItem(LS.TD, isoToday()); }
-  n = (n % 999) + 1;
-  localStorage.setItem(LS.T, String(n));
-  return String(n).padStart(3,"0");
+// ── BILL NUMBER ──
+// Next number = highest number among today's bills in the Sheet + 1 (starts at 001 each day).
+// A deleted bill is gone from the Sheet, so if the last bill (006) is deleted the next one is 006 again.
+// The Sheet has the final say when the bill is saved, so two phones never share a number.
+function nextToken(){
+  const t = isoToday();
+  const max = orders.reduce((m, o) => orderISO(o) === t ? Math.max(m, parseInt(o.token, 10) || 0) : m, 0);
+  return String(max + 1).padStart(3, "0");
 }
 
 // ── CUSTOMERS + FAVOURITES (worked out from bill history) ──
@@ -418,28 +397,26 @@ async function boot(){
   loadSettings(); applyShopName();
   $("verTxt").textContent = (S.shopName || "Ridhi Chats") + " POS v" + APP_VERSION;
   await DB.open();
-  await oneTimeReset();
-  queue = lsGet(LS.QUEUE, []); if(!Array.isArray(queue)) queue = []; // re-read: the clean start may have just emptied it
+  await purgeLocalData();
   loadMenuStores();
   try{ (await DB.entries("images")).forEach(([k, v]) => { IMGS[k] = v; }); }catch(e){}
   buildMenu();
-  await loadOrders();
-  expenses = lsGet(LS.EXP, []); if(!Array.isArray(expenses)) expenses = [];
   held = lsGet(LS.HELD, []); if(!Array.isArray(held)) held = [];
   // Use the built-in Sheet link unless one was entered (or Disconnect was tapped) in Settings
   const savedUrl = localStorage.getItem(LS.U);
   sheetUrl = savedUrl === null ? DEFAULT_SHEET_URL : savedUrl; sheetOn = !!sheetUrl;
   rebuildIndex();
-  activeCat = favIds.length ? FAV : Object.keys(MENU)[0];
-  loadKitchen();
+  activeCat = Object.keys(MENU)[0];
   applyRole();
   renderTypeSeg(); renderCats(); renderMenu(); renderCart();
   updateClock(); setInterval(updateClock, 30000);
   const t = isoToday();
   ["dFrom","dTo"].forEach(id => { $(id).value = t; }); // History and Expenses open on "All" (newest first)
-  updateSyncUI(); flushQueue(); setInterval(flushQueue, 60000);
-  pullSheet(); setInterval(pullSheet, 120000); // keep this device in step with the Sheet
-  window.addEventListener("online", () => { flushQueue(); pullSheet(); });
+  updateSyncUI();
+  pullSheet().then(() => { if(favIds.length && !cart.length){ activeCat = FAV; if(curView === "pos"){ renderCats(); renderMenu(); } } });
+  setInterval(pullSheet, 60000); // bills and expenses always come from the Sheet
+  window.addEventListener("online", () => pullSheet());
+  window.addEventListener("offline", updateSyncUI);
   prnRestore();
   pwaInit();
   setTimeout(() => $("loginPass").focus(), 300);
