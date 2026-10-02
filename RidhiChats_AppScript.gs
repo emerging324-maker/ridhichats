@@ -1,8 +1,8 @@
 /**
- * Ridhi Chats POS — Google Sheets backend (script version 4)
+ * Ridhi Chats POS — Google Sheets backend (script version 5)
  *
- * The Sheet is the ONLY place bills and expenses are stored. The app saves a bill here first
- * and only then prints it; deleting a bill here frees its number.
+ * The Sheet is where bills and expenses are stored. The app prints a bill at once and sends it
+ * here in the background (straight away when there is internet). Deleting a bill frees its number.
  *
  * SETUP (one time, about 3 minutes)
  *  1. Open your Google Sheet  →  Extensions  →  Apps Script
@@ -52,9 +52,7 @@ function iso_(v) {
 
 function pad3_(n) { n = String(n); while (n.length < 3) n = '0' + n; return n; }
 
-// Bill number for a NEW bill = highest number used today + 1.
-// Deleted bills are gone from the sheet, so their number is free again
-// (delete bill 006 when it is the last one, and the next bill is 006).
+// Used only when a bill arrives without a number: highest number used today + 1.
 function nextToken_(sh, dateISO) {
   var last = sh.getLastRow(), max = 0;
   if (last >= 2) {
@@ -71,8 +69,10 @@ function nextToken_(sh, dateISO) {
 function upsertOrder_(d) {
   var sh = sheet_(SH_ORDERS, ORDER_COLS);
   var r = findRow_(sh, d.id);
-  // the sheet decides the bill number, so two phones can never give out the same one
-  d.token = r ? pad3_(sh.getRange(r, col_(ORDER_COLS, 'token')).getValue() || d.token || 0) : nextToken_(sh, d.dateISO || '');
+  // The phone prints the bill at once, so the number it printed is kept.
+  // (An existing row keeps its number; a bill sent without a number gets highest-of-today + 1.)
+  if (r) d.token = pad3_(sh.getRange(r, col_(ORDER_COLS, 'token')).getValue() || d.token || 0);
+  else d.token = parseInt(d.token, 10) > 0 ? pad3_(parseInt(d.token, 10)) : nextToken_(sh, d.dateISO || '');
   var items = d.items || [];
   var text = items.map(function (i) { return i.name + ' x' + i.qty + (i.note ? ' (' + i.note + ')' : ''); }).join('; ');
   var copy = {};
@@ -182,7 +182,7 @@ function doPost(e) {
   try {
     var res = handle_(JSON.parse(e.postData.contents)) || {};
     res.ok = true;
-    res.v = 4;
+    res.v = 5;
     return ContentService.createTextOutput(JSON.stringify(res)).setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify({ok: false, error: String(err)})).setMimeType(ContentService.MimeType.JSON);
@@ -198,7 +198,7 @@ function doGet(e) {
     if (p.action === 'getOrders') data = {orders: readOrders_(2)};
     else if (p.action === 'getKitchen') data = {kitchen: getKitchen_(p.d)};
     else if (p.action === 'getExpenses') data = {expenses: readExpenses_()};
-    else data = {ok: true, app: 'ridhi-pos', version: 4};
+    else data = {ok: true, app: 'ridhi-pos', version: 5};
   } catch (err) {
     data = {ok: false, error: String(err)};
   }

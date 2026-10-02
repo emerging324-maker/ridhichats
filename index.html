@@ -43,7 +43,7 @@
   <nav class="nav-top" id="navTop"></nav>
   <div class="top-right">
     <span class="pill" id="clock"></span>
-    <button class="pill" id="syncPill" onclick="fetchSheet()" title="Tap to refresh from the Sheet">Sheet…</button>
+    <button class="pill" id="syncPill" onclick="sv('sync')" title="Sync status">Sheet…</button>
     <span class="pill" id="rolePill">Staff</span>
     <button class="icon-btn" title="Lock" onclick="lockApp()">&#128274;</button>
   </div>
@@ -177,6 +177,9 @@
 
 <!-- SETTINGS -->
 <div id="view-settings" class="view"><div class="page" style="max-width:760px;" id="settingsPage"></div></div>
+
+<!-- SYNC -->
+<div id="view-sync" class="view"><div class="page" style="max-width:760px;" id="syncPage"></div></div>
 
 </div><!-- /views -->
 

@@ -141,27 +141,24 @@ function openCancel(id){
   $("cancelQuick").innerHTML = ["Wrong item billed","Customer left","Billed twice","Test bill"].map(r => '<button class="chip" onclick="document.getElementById(\'cancelReason\').value=this.textContent">' + r + "</button>").join("");
   openM("cancelMod");
 }
-async function confirmCancel(){
+function confirmCancel(){
   const o = findOrder(cancelId); if(!o) return closeM("cancelMod");
   const reason = $("cancelReason").value.trim();
   if(!reason){ toast("⚠️ Enter a reason"); return; }
-  const r = await sheetSave({type:"cancel", id:o.id, reason}, "Cancelling bill in the Sheet...", confirmCancel);
-  if(!r) return;
-  o.status = "cancelled"; o.cancelReason = reason; o.kitchenStatus = "done";
-  rebuildIndex(); closeM("cancelMod"); renderHist(); renderCats();
+  if(!sheetReady(confirmCancel)) return;
+  enqueue({type:"cancel", id:o.id, reason});
+  closeM("cancelMod"); renderHist(); renderCats();
   toast("❌ Bill #" + o.token + " cancelled");
 }
-// Delete removes the bill from the Sheet completely. Its number becomes free:
+// Delete removes the bill completely (from the Sheet too). Its number becomes free:
 // if it was today's last bill, the next bill gets the same number.
-async function deleteBill(id, sure){
+function deleteBill(id){
   if(!needOwner()) return;
   const o = findOrder(id); if(!o) return;
-  if(!sure && !confirm("Delete bill #" + o.token + " (" + fmt(o.total) + ") for ever?\n\nIt is removed from the Google Sheet and from all reports. This cannot be undone.")) return;
-  const r = await sheetSave({type:"orderDelete", id:o.id}, "Deleting bill from the Sheet...", () => deleteBill(id, true));
-  if(!r) return;
-  if(r.deleted !== true){ showNet("oldscript"); return; }
-  orders = orders.filter(x => String(x.id) !== String(o.id));
-  rebuildIndex(); renderHist(); renderCats();
+  if(!confirm("Delete bill #" + o.token + " (" + fmt(o.total) + ") for ever?\n\nIt is removed from the Google Sheet and from all reports. This cannot be undone.")) return;
+  if(!sheetReady(() => deleteBill(id))) return;
+  enqueue({type:"orderDelete", id:o.id});
+  renderHist(); renderCats();
   toast("🗑️ Bill #" + o.token + " deleted · next bill number: " + nextToken(), 4500);
 }
 
@@ -171,13 +168,12 @@ function kitchenList(){
   const t = isoToday();
   return orders.filter(o => orderISO(o) === t && isLive(o) && (o.kitchenStatus || "preparing") !== "done");
 }
-async function setKS(id, s){
+function setKS(id, s){
   const o = findOrder(id); if(!o) return;
-  const before = o.kitchenStatus || "preparing";
-  o.kitchenStatus = s; renderKitchen();                 // show at once, then confirm with the Sheet
+  if(!sheetReady(() => setKS(id, s))) return;
   if(s === "ready") playSound("ready");
-  const r = await sheetSave({type:"kitchen", id:o.id, status:s}, "", () => setKS(id, s), true);
-  if(!r){ o.kitchenStatus = before; renderKitchen(); }  // not saved → put it back
+  enqueue({type:"kitchen", id:o.id, status:s});
+  renderKitchen();
 }
 function renderKitchen(){
   const list = kitchenList();
@@ -273,29 +269,23 @@ function openExp(id){
   expPMSel = e ? (e.paidVia || "cash") : "cash";
   drawExpForm(); openM("expMod");
 }
-async function saveExp(){
+function saveExp(){
   const desc = $("expDesc").value.trim(), amount = r2($("expAmt").value), dateISO = $("expDate").value, custom = $("expCustom").value.trim();
   const category = custom ? custom.toLowerCase().replace(/\s+/g, "_") : (expCatSel || "other");
   if(!desc){ toast("⚠️ Enter a description"); return; }
   if(!(amount > 0)){ toast("⚠️ Enter a valid amount"); return; }
   if(!dateISO){ toast("⚠️ Choose a date"); return; }
   const p = dateISO.split("-"), rec = {desc, amount, dateISO, date:+p[2] + "/" + +p[1] + "/" + p[0], category, paidVia:expPMSel};
-  if(!expEditId && !expNewId) expNewId = "e" + Date.now(); // keeps the same id if "Try again" is tapped
+  if(!sheetReady(saveExp)) return;
   const old = expEditId ? expenses.find(e => String(e.id) === String(expEditId)) : null;
-  const saved = Object.assign({}, old || {id:expNewId}, rec);
-  const r = await sheetSave(Object.assign({type:"expense"}, saved), "Saving expense to the Sheet...", saveExp);
-  if(!r) return;
-  if(old) expenses = expenses.map(e => String(e.id) === String(saved.id) ? saved : e);
-  else expenses.unshift(saved);
-  expNewId = "";
+  enqueue(Object.assign({type:"expense"}, old || {id:"e" + Date.now()}, rec));
   closeM("expMod"); renderExp(); toast(old ? "✅ Expense updated" : "✅ Expense added");
 }
-async function deleteExp(id, sure){
+function deleteExp(id){
   if(!needOwner()) return;
-  if(!sure && !confirm("Delete this expense from the Sheet?")) return;
-  const r = await sheetSave({type:"expenseDelete", id}, "Deleting expense from the Sheet...", () => deleteExp(id, true));
-  if(!r) return;
-  expenses = expenses.filter(e => String(e.id) !== String(id));
+  if(!confirm("Delete this expense?")) return;
+  if(!sheetReady(() => deleteExp(id))) return;
+  enqueue({type:"expenseDelete", id});
   renderExp(); toast("🗑️ Expense deleted");
 }
 function csvExpenses(){
@@ -325,17 +315,29 @@ function openCustomer(ph){
   openM("custMod");
 }
 
-// ── GOOGLE SHEET: the only place bills and expenses are stored ──
-// Nothing is queued or kept on the device. A bill counts as saved only when the Sheet answers "ok".
+// ── GOOGLE SHEET SYNC ──
+// The Sheet is where bills and expenses live. To keep billing instant, every change is applied on
+// screen at once and put in a small "to sync" list (the outbox) on the device. The outbox is pushed
+// to the Sheet in the background — immediately when there is internet, otherwise as soon as it
+// returns — and each item is removed from the device the moment the Sheet confirms it.
 let sheetState = "idle";   // idle | ok | down
 let writeSeq = 0;          // goes up on every confirmed save, so an older read can never overwrite newer data
-let pulling = false, lastPull = null, dataSig = "";
+let pulling = false, flushing = false, lastPull = null, lastPush = null, dataSig = "";
+let outbox = lsGet(LS.OUTBOX, []);
+if(!Array.isArray(outbox)) outbox = [];
+function saveOutbox(){ lsSet(LS.OUTBOX, outbox); }
+const offline = () => navigator.onLine === false || sheetState === "down";
+
 function updateSyncUI(){
   const p = $("syncPill"); if(!p) return;
+  const n = outbox.length;
   if(!sheetOn){ p.className = "pill off"; p.textContent = "Sheet off"; }
-  else if(navigator.onLine === false || sheetState === "down"){ p.className = "pill warn"; p.textContent = "⚠ No connection"; }
+  else if(n && offline()){ p.className = "pill warn"; p.textContent = "⚠ Offline · " + n + " to sync"; }
+  else if(n){ p.className = "pill warn"; p.textContent = "⏳ Syncing " + n; }
+  else if(offline()){ p.className = "pill warn"; p.textContent = "⚠ No connection"; }
   else if(sheetState === "ok"){ p.className = "pill ok"; p.textContent = "Sheet ✓"; }
   else { p.className = "pill"; p.textContent = "Sheet…"; }
+  if(curView === "sync") renderSync();
 }
 function jsonp(url, params){
   return new Promise((res, rej) => {
@@ -356,47 +358,112 @@ async function sheetWrite(body){
   try{
     const r = await fetch(sheetUrl, {method:"POST", body:JSON.stringify(body), signal:ctl.signal});
     const j = await r.json();
-    if(j && j.ok){ writeSeq++; sheetState = "ok"; updateSyncUI(); return Object.assign({}, j, {ok:true}); }
+    if(j && j.ok){ writeSeq++; sheetState = "ok"; return Object.assign({}, j, {ok:true}); }
     return {ok:false, reason:"script", error:String((j && j.error) || "")};
-  }catch(e){ sheetState = "down"; updateSyncUI(); return {ok:false, reason:"network"}; }
+  }catch(e){ sheetState = "down"; return {ok:false, reason:"network"}; }
   finally{ clearTimeout(t); }
 }
-// sheetWrite + "Saving..." screen + the "not connected" pop-up. Returns the Sheet's answer, or null if not saved.
-async function sheetSave(body, msg, retry, quiet){
-  if(!quiet) busy(true, msg || "Saving to the Sheet...");
-  const r = await sheetWrite(body);
-  if(!quiet) busy(false);
-  if(r.ok) return r;
-  showNet(r.reason, retry, r.error);
-  return null;
+
+// ── Applying a change to what is on screen ──
+function normExpense(x){
+  const iso = toISO(x.dateISO || x.date), p = iso.split("-");
+  return {id:String(x.id), desc:String(x.desc || ""), amount:r2(x.amount), dateISO:iso, date:p.length === 3 ? +p[2] + "/" + +p[1] + "/" + p[0] : "",
+    category:String(x.category || "other"), paidVia:String(x.paidVia || "cash")};
 }
-// ── "Not connected" pop-up ──
+function applyOp(b){
+  const same = x => String(x.id) === String(b.id);
+  if(b.type === "order"){
+    const o = Object.assign({}, b); delete o.type;
+    orders = orders.filter(x => !same(x)); orders.push(normOrder(o));
+  } else if(b.type === "cancel"){ const o = orders.find(same); if(o){ o.status = "cancelled"; o.cancelReason = b.reason || ""; o.kitchenStatus = "done"; } }
+  else if(b.type === "orderDelete") orders = orders.filter(x => !same(x));
+  else if(b.type === "kitchen"){ const o = orders.find(same); if(o) o.kitchenStatus = b.status; }
+  else if(b.type === "expense"){ expenses = expenses.filter(x => !same(x)); expenses.push(normExpense(b)); }
+  else if(b.type === "expenseDelete") expenses = expenses.filter(x => !same(x));
+}
+function sortData(){
+  sortOrders();
+  expenses.sort((a,b) => a.dateISO < b.dateISO ? 1 : a.dateISO > b.dateISO ? -1 : (String(b.id) > String(a.id) ? 1 : -1));
+}
+// Is the Sheet connected at all? (No internet is fine — the change waits in the outbox.)
+function sheetReady(retry){
+  if(sheetOn) return true;
+  showNet("nolink", retry);
+  return false;
+}
+// Make a change: show it at once, remember it in the outbox, push it in the background.
+function enqueue(body){
+  const inFlight = it => flushing && outbox[0] === it;
+  const mine = it => String(it.body.id) === String(body.id);
+  // deleting something that never reached the Sheet → just forget it, nothing to send
+  if((body.type === "orderDelete" || body.type === "expenseDelete")){
+    const make = body.type === "orderDelete" ? "order" : "expense";
+    if(outbox.some(it => mine(it) && it.body.type === make && !inFlight(it))){
+      outbox = outbox.filter(it => !mine(it) || inFlight(it));
+      applyOp(body); sortData(); rebuildIndex(); syncTokenHint(); saveOutbox(); updateSyncUI();
+      return;
+    }
+  }
+  // several kitchen taps on the same bill → only the last one needs sending
+  if(body.type === "kitchen") outbox = outbox.filter(it => !(mine(it) && it.body.type === "kitchen" && !inFlight(it)));
+  applyOp(body); sortData(); rebuildIndex(); syncTokenHint();
+  outbox.push({k:Date.now() + "_" + Math.floor(Math.random() * 1e6), at:Date.now(), body, tries:0, err:""});
+  saveOutbox(); updateSyncUI(); flushOutbox();
+}
+// Push the outbox to the Sheet, oldest first. Stops at the first failure and tries again later.
+async function flushOutbox(){
+  if(flushing || !sheetOn || !outbox.length || navigator.onLine === false){ updateSyncUI(); return; }
+  flushing = true;
+  let oldScript = false, tokenFix = false;
+  try{
+    while(outbox.length && sheetOn){
+      const it = outbox[0];
+      const r = await sheetWrite(it.body);
+      if(!r.ok){ it.tries++; it.err = r.reason === "script" ? "The Sheet refused it: " + (r.error || "error") : "No connection"; saveOutbox(); break; }
+      outbox.shift(); saveOutbox(); lastPush = new Date();
+      if(it.body.type === "order" && r.token){
+        const o = findOrder(it.body.id), t = String(r.token).padStart(3, "0");
+        if(o && o.token !== t){ o.token = t; tokenFix = true; }
+      }
+      if(it.body.type === "orderDelete" && r.deleted !== true) oldScript = true;
+      updateSyncUI();
+    }
+  }finally{ flushing = false; updateSyncUI(); }
+  if(tokenFix){ syncTokenHint(); refreshView(); }
+  if(oldScript){ showNet("oldscript"); pullSheet(); }
+}
+function syncNow(){
+  if(!sheetReady(syncNow)) return;
+  if(navigator.onLine === false){ toast("📡 No internet — it will sync by itself when the connection is back"); return; }
+  sheetState = "idle"; updateSyncUI();
+  flushOutbox().then(() => pullSheet()).then(() => toast(outbox.length ? "⚠️ " + outbox.length + " still waiting — see the Sync page" : "✅ Everything is in the Sheet"));
+}
+function discardOutbox(k){
+  if(!needOwner()) return;
+  const it = outbox.find(x => x.k === k); if(!it) return;
+  if(!confirm("Remove this from the sync list?\n\nIt will NOT be sent to the Sheet. This cannot be undone.")) return;
+  outbox = outbox.filter(x => x.k !== k); saveOutbox();
+  pullSheet().then(r => { if(!r || !r.ok) refreshView(); });
+  updateSyncUI();
+}
+
+// ── "Sheet not connected" / "update script" pop-up ──
 let netRetry = null;
-function showNet(reason, retry, detail){
+function showNet(reason, retry){
   netRetry = retry || null;
-  const again = netRetry ? '<button class="btn primary" onclick="netAgain()">🔄 Try again</button>' : "";
   let title, msg, btns;
-  if(reason === "nolink"){
-    title = "🔌 Google Sheet not connected";
-    msg = "Bills are saved only in the Google Sheet, so this cannot be saved until the Sheet is connected.<br><br><b>Nothing is lost</b> — everything is still on the screen.";
-    btns = '<button class="btn primary" onclick="netConnect()">🔗 Connect now</button><button class="btn ghost" onclick="closeM(\'netMod\')">Close</button>';
-  } else if(reason === "oldscript"){
+  if(reason === "oldscript"){
     title = "⚠️ Update the Apps Script";
-    msg = "Deleting a bill needs the new script. In Google Sheets open Extensions → Apps Script, paste the new <b>RidhiChats_AppScript.gs</b>, then Deploy → Manage deployments → pencil → New version → Deploy.<br><br>The bill was <b>not</b> deleted.";
+    msg = "Deleting a bill needs the new script. In Google Sheets open Extensions → Apps Script, paste the new <b>RidhiChats_AppScript.gs</b>, then Deploy → Manage deployments → pencil → New version → Deploy.<br><br>The bill was <b>not</b> deleted from the Sheet.";
     btns = '<button class="btn ghost" onclick="closeM(\'netMod\')">OK</button>';
-  } else if(reason === "script"){
-    title = "⚠️ The Sheet did not accept it";
-    msg = "The Google Sheet answered with an error, so this was <b>not saved</b>.<br><span class=\"muted small\">" + esc(detail || "") + "</span>";
-    btns = again + '<button class="btn ghost" onclick="closeM(\'netMod\')">Close</button>';
   } else {
-    title = "📡 No connection to the Sheet";
-    msg = "This was <b>NOT saved</b> — the Google Sheet could not be reached. Check the internet (Wi-Fi / mobile data), then tap <b>Try again</b>.<br><br><b>Nothing is lost</b> — everything is still on the screen.";
-    btns = again + '<button class="btn ghost" onclick="closeM(\'netMod\')">Close</button>';
+    title = "🔌 Google Sheet not connected";
+    msg = "Bills are stored in the Google Sheet, and the Sheet is switched off on this device. Connect it to continue.<br><br><b>Nothing is lost</b> — everything is still on the screen.";
+    btns = '<button class="btn primary" onclick="netConnect()">🔗 Connect now</button><button class="btn ghost" onclick="closeM(\'netMod\')">Close</button>';
   }
   $("netTitle").textContent = title; $("netMsg").innerHTML = msg; $("netBtns").innerHTML = btns;
   openM("netMod"); playSound("error");
 }
-function netAgain(){ const f = netRetry; netRetry = null; closeM("netMod"); if(f) f(); }
 function netConnect(){
   const f = netRetry; netRetry = null; closeM("netMod");
   sheetUrl = DEFAULT_SHEET_URL; sheetOn = true; localStorage.removeItem(LS.U); sheetState = "idle"; // back to the built-in link
@@ -406,6 +473,7 @@ function netConnect(){
 async function connectSheet(){
   const url = $("setUrl").value.trim();
   if(!/^https:\/\/script\.google\.com\/.+\/exec/.test(url)){ toast("⚠️ Paste the Web App URL ending in /exec"); return; }
+  if(outbox.length && url !== sheetUrl && !confirm(outbox.length + " change(s) are still waiting to sync. They will be sent to the NEW Sheet link. Continue?")) return;
   sheetUrl = url; sheetOn = true; localStorage.setItem(LS.U, url); sheetState = "idle";
   updateSyncUI();
   await fetchSheet(); // load this Sheet's bills and expenses straight away
@@ -416,13 +484,13 @@ function useDefaultSheet(){
   updateSyncUI(); reSettings(); fetchSheet();
 }
 function disconnectSheet(){
-  if(!confirm("Disconnect the Google Sheet?\n\nBilling stops until it is connected again — bills are saved only in the Sheet.")) return;
+  if(!confirm("Disconnect the Google Sheet?\n\nBilling stops until it is connected again." + (outbox.length ? "\n\n" + outbox.length + " change(s) not yet synced will stay on this device and sync when you reconnect." : ""))) return;
   sheetUrl = ""; sheetOn = false; localStorage.setItem(LS.U, ""); // "" = stay off, do not fall back to the built-in link
-  orders = []; expenses = []; dataSig = ""; rebuildIndex();
+  orders = []; expenses = []; dataSig = ""; outbox.forEach(it => applyOp(it.body)); sortData(); rebuildIndex();
   updateSyncUI(); renderSettings(); toast("🔌 Sheet disconnected");
 }
-// Load ALL bills and expenses from the Sheet into memory (replacing what was shown).
-// Runs when the app opens, every minute, after connecting, and when "Refresh" is tapped.
+// Load ALL bills and expenses from the Sheet (replacing what was shown), then put the changes that
+// are still waiting in the outbox back on top. Runs when the app opens, every minute, and on demand.
 async function pullSheet(){
   if(!sheetOn){ updateSyncUI(); return null; }
   if(pulling) return null;
@@ -435,18 +503,11 @@ async function pullSheet(){
       if(!data || !Array.isArray(data.orders)) throw new Error("bad answer");
       let exp = null;
       try{ const e = await jsonp(sheetUrl, {action:"getExpenses"}); if(e && Array.isArray(e.expenses)) exp = e.expenses; }catch(err){}
-      if(seq !== writeSeq) continue; // a bill was saved while we were reading → read again
+      if(seq !== writeSeq) continue; // something was saved while we were reading → read again
       orders = data.orders.filter(r => r && r.id != null).map(normOrder);
-      sortOrders();
-      if(exp){
-        expenses = exp.filter(x => x && x.id != null && x.id !== "").map(x => {
-          const iso = toISO(x.dateISO), p = iso.split("-");
-          return {id:String(x.id), desc:String(x.desc || ""), amount:r2(x.amount), dateISO:iso, date:p.length === 3 ? +p[2] + "/" + +p[1] + "/" + p[0] : "",
-            category:String(x.category || "other"), paidVia:String(x.paidVia || "cash")};
-        }).sort((a,b) => a.dateISO < b.dateISO ? 1 : a.dateISO > b.dateISO ? -1 : (String(b.id) > String(a.id) ? 1 : -1));
-        res.expSupported = true;
-      }
-      rebuildIndex();
+      if(exp){ expenses = exp.filter(x => x && x.id != null && x.id !== "").map(normExpense); res.expSupported = true; }
+      outbox.forEach(it => applyOp(it.body)); // not-yet-synced changes stay visible
+      sortData(); rebuildIndex(); syncTokenHint();
       res.ok = true; res.bills = orders.length; res.exp = expenses.length;
       sheetState = "ok"; lastPull = new Date();
       const sig = orders.map(o => o.id + ":" + o.status + ":" + o.kitchenStatus + ":" + o.token).join("|") + "#" + expenses.map(e => e.id + ":" + e.amount).join("|");
@@ -455,6 +516,7 @@ async function pullSheet(){
     }
   }catch(e){ sheetState = "down"; }
   finally{ pulling = false; updateSyncUI(); }
+  if(res.ok) flushOutbox();
   return res;
 }
 function refreshView(){
@@ -471,9 +533,42 @@ async function fetchSheet(){
   let r = await pullSheet();
   if(!r){ await new Promise(x => setTimeout(x, 1500)); r = await pullSheet(); }
   busy(false);
-  if(!r || !r.ok) showNet("network", fetchSheet);
+  if(!r || !r.ok) toast("📡 Could not reach the Sheet — check the internet");
   else toast("✅ Sheet: " + r.bills + " bills · " + r.exp + " expenses", 4000);
   if(curView === "settings") reSettings();
+}
+
+// ── SYNC PAGE ──
+function opLabel(b){
+  const o = b.type === "order" ? b : findOrder(b.id);
+  const tok = o ? "#" + o.token : "bill";
+  if(b.type === "order") return {icon:"🧾", t:"New bill " + tok, d:fmt(b.total) + " · " + (b.items || []).length + " item(s) · " + (b.time || "")};
+  if(b.type === "cancel") return {icon:"❌", t:"Cancel " + tok, d:b.reason || ""};
+  if(b.type === "orderDelete") return {icon:"🗑️", t:"Delete a bill", d:""};
+  if(b.type === "kitchen") return {icon:"👨‍🍳", t:"Kitchen: " + tok + " → " + b.status, d:""};
+  if(b.type === "expense") return {icon:"💸", t:"Expense", d:fmt(b.amount) + " · " + (b.desc || "")};
+  if(b.type === "expenseDelete") return {icon:"🗑️", t:"Delete an expense", d:""};
+  return {icon:"•", t:b.type, d:""};
+}
+function renderSync(){
+  const el = $("syncPage"); if(!el) return;
+  const n = outbox.length, tm = d => d ? d.toLocaleTimeString("en-IN", {hour:"2-digit", minute:"2-digit"}) : "—";
+  let st, cls;
+  if(!sheetOn){ st = "Google Sheet is switched off"; cls = "red"; }
+  else if(offline()){ st = "No connection to the Sheet"; cls = "red"; }
+  else if(n){ st = "Syncing…"; cls = "gold"; }
+  else { st = "Everything is in the Sheet"; cls = "green"; }
+  el.innerHTML = '<div class="page-head"><h1>🔄 Sync</h1><div class="row"><button class="btn primary sm" onclick="syncNow()">Sync now</button><button class="btn ghost sm" onclick="fetchSheet()">Refresh from Sheet</button></div></div>'
+    + '<div class="stats"><div class="stat' + (n ? " hero" : "") + '"><div class="si">' + (n ? "⏳" : "✅") + '</div><div class="sv">' + n + '</div><div class="sl">waiting to sync</div></div>'
+    + '<div class="stat"><div class="si">📡</div><div class="sv" style="font-size:15px;"><span class="tag ' + cls + '">' + st + '</span></div><div class="sl">status</div></div>'
+    + '<div class="stat"><div class="si">⬆️</div><div class="sv">' + tm(lastPush) + '</div><div class="sl">last sent to Sheet</div></div>'
+    + '<div class="stat"><div class="si">⬇️</div><div class="sv">' + tm(lastPull) + '</div><div class="sl">last loaded from Sheet</div></div></div>'
+    + '<div class="card" style="margin-bottom:12px;"><h3>Waiting to sync</h3>'
+    + (n ? outbox.map((it, i) => { const L = opLabel(it.body);
+        return '<div class="sw-row"><div style="min-width:0;"><b>' + L.icon + " " + esc(L.t) + '</b><span class="d">' + esc(L.d) + (it.err ? ' · <span style="color:var(--red)">' + esc(it.err) + (it.tries > 1 ? " (" + it.tries + " tries)" : "") + "</span>" : (i === 0 && flushing ? " · sending…" : "")) + "</span></div>"
+          + '<button class="btn danger sm owner-only" data-k="' + esc(it.k) + '" onclick="discardOutbox(this.dataset.k)">Remove</button></div>';
+      }).join("") : '<div class="muted small">Nothing is waiting. Every bill and expense is saved in the Google Sheet.</div>') + "</div>"
+    + '<div class="card"><h3>How it works</h3><div class="muted small" style="line-height:1.6;">Bills print at once and are sent to the Google Sheet in the background — usually within a few seconds. With no internet they wait here and go by themselves when the connection is back; you can keep billing. Once the Sheet has a bill it is removed from this list and from the phone. <b>Do not clear Chrome data while something is waiting here.</b></div></div>';
 }
 
 // ── SETTINGS ──
@@ -508,7 +603,7 @@ function renderSettings(){
       + '<div class="row" style="margin-bottom:8px;"><button class="btn primary sm" onclick="connectSheet()">' + (sheetOn ? "Update link" : "Connect") + "</button>"
       + (sheetUrl !== DEFAULT_SHEET_URL ? '<button class="btn ghost sm" onclick="useDefaultSheet()">Use built-in link</button>' : "")
       + (sheetOn ? '<button class="btn ghost sm" onclick="fetchSheet()">🔄 Refresh from Sheet</button><button class="btn danger sm" onclick="disconnectSheet()">Disconnect</button>' : "") + "</div>"
-      + '<div class="muted small">Bills and expenses are stored <b>only in this Google Sheet</b> — nothing is kept on the phone. Every bill is saved to the Sheet before it prints, so billing needs internet.' + (lastPull ? " Last loaded " + lastPull.toLocaleTimeString("en-IN", {hour:"2-digit", minute:"2-digit"}) + "." : "") + ' Deleting a bill needs the latest <b>RidhiChats_AppScript.gs</b>.</div></div>'
+      + '<div class="muted small">Bills and expenses are stored in this Google Sheet. A bill prints at once and is sent to the Sheet in the background; with no internet it waits on the <a href="#" style="color:var(--gold)" onclick="sv(\'sync\');return false;">Sync page</a> and goes by itself later.' + (lastPull ? " Last loaded " + lastPull.toLocaleTimeString("en-IN", {hour:"2-digit", minute:"2-digit"}) + "." : "") + ' Deleting a bill needs the latest <b>RidhiChats_AppScript.gs</b>.</div></div>'
     + '<div class="card" style="margin-bottom:12px;"><h3>💾 Backup of this device setup</h3><div class="muted small" style="margin-bottom:10px;">Saves the menu changes, your photos and these settings (not bills — those are in the Sheet). Use it to set up a new phone quickly.</div>'
       + '<div class="row"><button class="btn green sm" onclick="backupNow()">⬇️ Download backup</button><button class="btn ghost sm" onclick="document.getElementById(\'restoreFile\').click()">⬆️ Restore from backup</button><input type="file" id="restoreFile" accept=".json,application/json" class="hide" onchange="restoreBackup(this)"/></div></div>'
     + '<div class="card"><h3>ℹ️ About</h3><div class="muted small">Ridhi Chats POS v' + APP_VERSION + " · " + orders.length + " bills and " + expenses.length + " expenses in the Sheet · " + Object.keys(IMGS).length + " own photos</div></div>";

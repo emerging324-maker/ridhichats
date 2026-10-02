@@ -308,6 +308,14 @@ table.tbl{width:100%;border-collapse:collapse;font-size:12.5px;}
   .top{padding:0 12px;gap:8px;}
   .brand span{display:none;}
   #clock{display:none;}
+  /* header must never be wider than the phone, however long the sync status is */
+  .top{max-width:100vw;overflow:hidden;}
+  .brand{min-width:0;flex-shrink:1;}
+  .brand b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .top-right{min-width:0;gap:6px;}
+  #syncPill{min-width:0;flex-shrink:1;overflow:hidden;text-overflow:ellipsis;display:block;line-height:30px;}
+  #rolePill .pl{display:none;}
+  #rolePill,.top .icon-btn{flex-shrink:0;}
   .nav-bot{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;position:fixed;left:0;right:0;bottom:0;height:var(--bot);background:rgba(19,19,26,.96);backdrop-filter:blur(14px);border-top:1px solid var(--line);z-index:44;padding-bottom:env(safe-area-inset-bottom);}
   .nav-bot .nv{flex-direction:column;gap:2px;font-size:10.5px;padding:6px 2px;border-radius:0;justify-content:center;}
   .nav-bot .nv i{font-style:normal;font-size:19px;}

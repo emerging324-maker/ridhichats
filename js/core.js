@@ -2,7 +2,7 @@
 // ══════════════════════════════════════════════════════
 //  Ridhi Chats POS v3 — core: data, storage, settings, login, navigation
 // ══════════════════════════════════════════════════════
-const APP_VERSION = "3.1";
+const APP_VERSION = "3.2";
 
 // ── MENU (built-in) ──
 const BASE_MENU = {
@@ -34,7 +34,7 @@ const typeLabel = id => (ORDER_TYPES.find(t => t.id === id) || ORDER_TYPES[0]).l
 
 // ── STORAGE KEYS (unchanged from v2 so existing shop data carries over) ──
 const LS = {O:"rc_orders",U:"rc_url",T:"rc_tok",TD:"rc_tok_date",COMBOS:"rc_combos",EXP:"rc_expenses",CMENU:"rc_custom_menu",CITEMS:"rc_custom_items",
-  SET:"rc_settings",OVER:"rc_item_over",HELD:"rc_held",OOS:"rc_oos",QUEUE:"rc_queue",KIT:"rc_kitchen",PRN:"rc_printer",RESET:"rc_reset"};
+  SET:"rc_settings",OVER:"rc_item_over",HELD:"rc_held",OOS:"rc_oos",QUEUE:"rc_queue",KIT:"rc_kitchen",PRN:"rc_printer",RESET:"rc_reset",OUTBOX:"rc_outbox",TOKH:"rc_tokhint"};
 
 // ── HELPERS ──
 const $ = id => document.getElementById(id);
@@ -179,10 +179,11 @@ let activeCat = "Samosa", menuMode = "", role = null;
 let curReceipt = null, sheetUrl = "", sheetOn = false;
 let customers = new Map(), favIds = [];
 
-// ── NOTHING ABOUT BILLS IS KEPT ON THE DEVICE ──
-// The Google Sheet is the only store for bills and expenses. Every time the app opens it removes
-// any bill data an older version left on this device (bills, expenses, kitchen list, upload queue,
-// token counter). Menu, prices, photos, settings, logins, the Sheet link and the printer stay.
+// ── OLD LOCAL DATA IS REMOVED ──
+// Bills and expenses live in the Google Sheet. The only bill data on the device is the short
+// "to sync" list (rc_outbox) of changes not yet confirmed by the Sheet. Every time the app opens it
+// removes what older versions stored here (bills, expenses, kitchen list, old upload queue, token
+// counter). Menu, prices, photos, settings, logins, the Sheet link and the printer stay.
 const DATA_RESET_ID = "2026-10-03";
 async function purgeLocalData(){
   try{ if(DB.ok) await DB.clear("orders"); }catch(e){}
@@ -261,11 +262,15 @@ function thumbHTML(item){
 // Next number = highest number among today's bills in the Sheet + 1 (starts at 001 each day).
 // A deleted bill is gone from the Sheet, so if the last bill (006) is deleted the next one is 006 again.
 // The Sheet has the final say when the bill is saved, so two phones never share a number.
-function nextToken(){
+function maxTokenToday(){
   const t = isoToday();
-  const max = orders.reduce((m, o) => orderISO(o) === t ? Math.max(m, parseInt(o.token, 10) || 0) : m, 0);
-  return String(max + 1).padStart(3, "0");
+  return orders.reduce((m, o) => orderISO(o) === t ? Math.max(m, parseInt(o.token, 10) || 0) : m, 0);
 }
+// The last number is also remembered on the device, so numbering continues correctly when the
+// app is opened with no internet (before today's bills could be loaded from the Sheet).
+function tokenHint(){ const h = lsGet(LS.TOKH, null); return h && h.date === isoToday() ? (parseInt(h.n, 10) || 0) : 0; }
+function syncTokenHint(){ lsSet(LS.TOKH, {date:isoToday(), n:maxTokenToday()}); }
+function nextToken(){ return String(Math.max(maxTokenToday(), tokenHint()) + 1).padStart(3, "0"); }
 
 // ── CUSTOMERS + FAVOURITES (worked out from bill history) ──
 function rebuildIndex(){
@@ -343,7 +348,7 @@ function needOwner(){ if(isOwner()) return true; toast("🔒 Owner login needed 
 function applyRole(){
   document.body.dataset.role = role || "";
   const rp = $("rolePill");
-  rp.textContent = isOwner() ? "👑 Owner" : "👤 Staff"; rp.className = "pill " + (isOwner() ? "warn" : "");
+  rp.innerHTML = isOwner() ? '👑<span class="pl"> Owner</span>' : '👤<span class="pl"> Staff</span>'; rp.className = "pill " + (isOwner() ? "warn" : "");
   if(menuMode === "edit" && !isOwner()) menuMode = "";
   renderNav();
 }
@@ -352,7 +357,7 @@ function applyRole(){
 const VIEWS = [
   {id:"pos", label:"Billing", icon:"🧾"}, {id:"kitchen", label:"Kitchen", icon:"👨‍🍳"}, {id:"history", label:"History", icon:"📋"},
   {id:"dashboard", label:"Reports", icon:"📊", owner:true}, {id:"expenses", label:"Expenses", icon:"💸", owner:true},
-  {id:"customers", label:"Customers", icon:"👥", owner:true}, {id:"settings", label:"Settings", icon:"⚙️", owner:true}];
+  {id:"customers", label:"Customers", icon:"👥", owner:true}, {id:"settings", label:"Settings", icon:"⚙️", owner:true}, {id:"sync", label:"Sync", icon:"🔄"}];
 let curView = "pos";
 function renderNav(){
   const vis = VIEWS.filter(v => !v.owner || isOwner());
@@ -383,6 +388,7 @@ function sv(v){
   if(v === "expenses") renderExp();
   if(v === "customers") renderCustomers();
   if(v === "settings") renderSettings();
+  if(v === "sync") renderSync();
   if(v !== "kitchen") kitchenClose();
 }
 function updateClock(){ const el = $("clock"); if(el) el.textContent = "● " + today() + " " + nowT(); }
@@ -405,6 +411,7 @@ async function boot(){
   // Use the built-in Sheet link unless one was entered (or Disconnect was tapped) in Settings
   const savedUrl = localStorage.getItem(LS.U);
   sheetUrl = savedUrl === null ? DEFAULT_SHEET_URL : savedUrl; sheetOn = !!sheetUrl;
+  outbox.forEach(it => applyOp(it.body)); sortData(); // bills not yet synced are shown straight away
   rebuildIndex();
   activeCat = Object.keys(MENU)[0];
   applyRole();
@@ -414,8 +421,9 @@ async function boot(){
   ["dFrom","dTo"].forEach(id => { $(id).value = t; }); // History and Expenses open on "All" (newest first)
   updateSyncUI();
   pullSheet().then(() => { if(favIds.length && !cart.length){ activeCat = FAV; if(curView === "pos"){ renderCats(); renderMenu(); } } });
-  setInterval(pullSheet, 60000); // bills and expenses always come from the Sheet
-  window.addEventListener("online", () => pullSheet());
+  setInterval(pullSheet, 60000);    // keep in step with the Sheet
+  setInterval(flushOutbox, 15000);  // keep pushing anything still waiting
+  window.addEventListener("online", () => { sheetState = "idle"; flushOutbox(); pullSheet(); });
   window.addEventListener("offline", updateSyncUI);
   prnRestore();
   pwaInit();
