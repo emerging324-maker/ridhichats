@@ -112,7 +112,7 @@ function sha256(str){
 }
 const passHash = p => sha256("rc:" + p);
 // Built-in Google Sheet (Apps Script Web App). A link typed in Settings always takes priority.
-const DEFAULT_SHEET_URL = "https://script.google.com/macros/s/AKfycbwWSu5MsaeacOAQWJHTxCStc17gHkMMBD-ozy2r5zN7CBdFO_nKOYahEPdnwIyNDAkcGA/exec";
+const DEFAULT_SHEET_URL = "https://script.google.com/macros/s/AKfycbzWIAbpc6NyhSY8OAp4RGONNlEA9e3Gag4AW6iOIo8CHQPXtvCqUYHentERoJQDOfPqAw/exec";
 const OWNER_DEFAULT_HASH ="ef6a77fcf392c92a0c8b6af9551353ad68a2d275f01b8e8b85a0ed0af347b67b"; // the shop's existing password
 
 // ── DATABASE (IndexedDB: bills + item photos; falls back to localStorage) ──
