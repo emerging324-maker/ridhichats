@@ -2,7 +2,7 @@
 // ══════════════════════════════════════════════════════
 //  Ridhi Chats POS v3 — core: data, storage, settings, login, navigation
 // ══════════════════════════════════════════════════════
-const APP_VERSION = "3.3";
+const APP_VERSION = "3.4";
 
 // ── MENU (built-in) ──
 const BASE_MENU = {
