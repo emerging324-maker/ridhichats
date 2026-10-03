@@ -48,7 +48,7 @@ function renderMenu(){
     const foot = menuMode ? "" : out ? "" : n
       ? '<div class="step" onclick="event.stopPropagation()"><button data-id="' + esc(item.id) + '" onclick="decItem(this.dataset.id)">−</button><span>' + n + '</span><button data-id="' + esc(item.id) + '" onclick="addToCart(this.dataset.id)">+</button></div>'
       : '<span class="plus">+</span>';
-    return '<div class="item' + (out ? " oos" : "") + '" data-id="' + esc(item.id) + '" onclick="tapItem(this.dataset.id)">'
+    return '<div class="item' + (out ? " oos" : "") + (n && !menuMode && !out ? " in-cart" : "") + (item.id === justAdded ? " pop" : "") + '" data-id="' + esc(item.id) + '" onclick="tapItem(this.dataset.id)">'
       + (out ? '<span class="sold">SOLD OUT</span>' : "")
       + (menuMode === "edit" ? '<span class="edit-badge">✏️ Edit</span>' : "")
       + (n && !menuMode ? '<span class="qty">' + n + "</span>" : "")
@@ -57,6 +57,7 @@ function renderMenu(){
       + (item.includes ? '<div class="inc">' + esc(item.includes) + "</div>" : "")
       + '<div class="ft"><span class="pr">' + fmt(item.price) + "</span>" + foot + "</div></div></div>";
   }).join("");
+  justAdded = null;
   if(menuMode === "edit" && !q && activeCat !== FAV) html += '<div class="item addcard" onclick="openItem(null)"><span>+</span>Add item</div>';
   if(!html) html = '<div class="empty" style="grid-column:1/-1;"><div>🔍</div>Nothing found</div>';
   $("menuGrid").innerHTML = html;
@@ -76,7 +77,7 @@ function tapItem(id){
 }
 
 // ── CART ──
-let lineSeq = 0;
+let lineSeq = 0, justAdded = null; // justAdded: the dish that just went into the bill (blooms once)
 const getSub = () => cart.reduce((s, l) => s + l.price * l.qty, 0);
 const getDA = () => Math.min(getSub(), discType === "percent" ? getSub() * Math.min(disc, 100) / 100 : disc);
 const getTotal = () => r2(Math.max(0, getSub() - getDA()));
@@ -87,7 +88,8 @@ function addToCart(id, qty){
   const plain = cart.find(l => l.id === id && !l.note && l.price === item.price);
   if(plain) plain.qty += qty || 1;
   else cart.push({lid:"l" + (++lineSeq), id:item.id, name:item.name, price:item.price, qty:qty || 1, icon:item.icon, note:"", includes:item.includes || "", combo:!!item.combo});
-  playSound("add"); renderMenu(); renderCart();
+  playSound("add"); justAdded = id; renderMenu(); renderCart();
+  try{ FX.burstAt(document.querySelector('.item[data-id="' + CSS.escape(id) + '"]')); }catch(e){}
 }
 function decItem(id){
   for(let i = cart.length - 1; i >= 0; i--) if(cart[i].id === id){ cart[i].qty--; if(cart[i].qty <= 0) cart.splice(i, 1); break; }

@@ -2,7 +2,7 @@
 // ══════════════════════════════════════════════════════
 //  Ridhi Chats POS v3 — core: data, storage, settings, login, navigation
 // ══════════════════════════════════════════════════════
-const APP_VERSION = "3.2";
+const APP_VERSION = "3.3";
 
 // ── MENU (built-in) ──
 const BASE_MENU = {
@@ -400,6 +400,7 @@ function applyShopName(){
 
 // ── BOOT ──
 async function boot(){
+  try{ FX.init(); }catch(e){}
   loadSettings(); applyShopName();
   $("verTxt").textContent = (S.shopName || "Ridhi Chats") + " POS v" + APP_VERSION;
   await DB.open();

@@ -1,7 +1,7 @@
 // Ridhi Chats POS — offline support. Bump CACHE on every release so phones pick up the new files.
-const CACHE = "ridhi-pos-v3.2.0";
+const CACHE = "ridhi-pos-v3.3.0";
 const SHELL = ["./","index.html","styles.css","manifest.webmanifest","logo.jpg","icon-192.png","icon-512.png",
-  "js/qrcode.js","js/core.js","js/pos.js","js/printer.js","js/admin.js",
+  "js/qrcode.js","js/fx.js","js/core.js","js/pos.js","js/printer.js","js/admin.js",
   "img/bhel.jpg","img/bluedrink.jpg","img/club.jpg","img/coldcoffee.jpg","img/corncanopy.jpg","img/cornchaat.jpg","img/cornpizza.jpg","img/cutlet.jpg","img/dahipapdi.jpg","img/dahipuri.jpg","img/falooda.jpg","img/fries.jpg","img/gingerlime.jpg","img/golisoda.jpg","img/grill.jpg","img/grill2.jpg","img/jeera.jpg","img/lemonade.jpg","img/masalapuri.jpg","img/mint.jpg","img/nippat.jpg","img/panipuri.jpg","img/papdi.jpg","img/perifries.jpg","img/pizza.jpg","img/pizza2.jpg","img/ragda.jpg","img/roll.jpg","img/roll2.jpg","img/samosa.jpg","img/sandwich.jpg","img/sevpuri.jpg","img/streetsandwich.jpg","img/tikki.jpg","img/toast.jpg","img/toast2.jpg","img/wrap.jpg"];
 self.addEventListener("install", e => {
   // cache each file on its own so one missing file can never block the install
